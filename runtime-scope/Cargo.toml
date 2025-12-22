@@ -1,0 +1,14 @@
+[package]
+name = "runtime-scope"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+aya = { workspace = true }
+aya-log = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+runtime-scope-common = { path = "../runtime-scope-common" }
+clap = { version = "4.5", features = ["derive"] }
+env_logger = "0.11"
+log = "0.4"
