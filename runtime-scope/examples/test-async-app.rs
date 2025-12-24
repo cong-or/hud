@@ -12,11 +12,34 @@ use std::time::Duration;
 use tokio::time::sleep;
 
 // ==============================================================================
-// MARKER FUNCTIONS FOR EBPF TRACING (LEARNING ONLY - WILL BE REMOVED LATER)
+// MARKER FUNCTIONS FOR EBPF TRACING (TEMPORARY - PHASE 1 ONLY)
 // ==============================================================================
-// These are intentionally NOT inlined so we can hook them with uprobes.
-// In production, we'll use scheduler tracepoints instead (which work on all code).
-// #[no_mangle] prevents Rust from mangling the symbol names.
+// ⚠️ THESE ARE TRAINING WHEELS - WILL BE REMOVED IN PHASE 3!
+//
+// Current approach (Phase 1-2):
+//   - Use #[no_mangle] marker functions
+//   - Easy to learn eBPF uprobes
+//   - Requires code modifications (not practical for users)
+//
+// Production approach (Phase 3+):
+//   - Use scheduler tracepoints (sched_switch, sched_wakeup)
+//   - NO code changes required
+//   - Works on ALL code (including inlined functions)
+//   - Profile any binary without modification
+//
+// Why we started with markers:
+//   - Easier to understand for learning
+//   - Get the basic pipeline working first
+//   - Then switch to production approach
+//
+// Timeline:
+//   Phase 1: ✅ Basic blocking detection with markers
+//   Phase 2: 🚧 Add stack traces (still with markers)
+//   Phase 3: 🎯 Remove markers, switch to scheduler tracepoints
+//   Phase 4: 🚀 Production-ready profiler (zero instrumentation)
+//
+// #[no_mangle] prevents Rust from mangling the symbol names, making them
+// easy to find with eBPF uprobes.
 
 #[no_mangle]
 #[inline(never)]

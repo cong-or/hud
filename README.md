@@ -14,10 +14,16 @@ Detect blocking operations in async code that harm executor performance. Built w
 - ✅ eBPF-based profiling (zero overhead when not running)
 - ✅ Process/thread tracking
 
+**⚠️ Important Note:**
+Current implementation uses `#[no_mangle]` marker functions for learning purposes.
+**These will be removed in Phase 4** when we switch to scheduler tracepoints.
+**Production version will require ZERO code changes** - profile any binary without modification!
+
 **Coming Soon:**
 - 🚧 Stack trace capture (see exact source location)
 - 🚧 Function name resolution
 - 🚧 Async task tracking
+- 🎯 **Remove markers, switch to scheduler tracepoints (no code changes!)**
 - 🚧 Cascade effect visualization
 - 🚧 TUI interface
 
@@ -406,9 +412,11 @@ Built with:
   - [ ] Associate blocking events with specific tasks
   - [ ] Show task spawn locations
 
-- [ ] **Phase 4:** Advanced profiling
-  - [ ] Switch from uprobes to scheduler tracepoints
+- [ ] **Phase 4:** Remove instrumentation (Critical!)
+  - [ ] **Switch from uprobes → scheduler tracepoints**
+  - [ ] **Remove all `#[no_mangle]` markers** (no code changes needed!)
   - [ ] Works on all code (including inlined functions)
+  - [ ] Profile any binary without modification
   - [ ] Cascade effect visualization
   - [ ] Task dependency graphs
   - [ ] Executor health metrics
