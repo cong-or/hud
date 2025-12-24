@@ -2,14 +2,18 @@
 
 // Shared data structures between eBPF and userspace
 
-/// Event sent from eBPF to userspace when a task is spawned
+/// Event types for runtime profiling
+pub const EVENT_BLOCKING_START: u32 = 1;
+pub const EVENT_BLOCKING_END: u32 = 2;
+
+/// Event sent from eBPF to userspace
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct TaskEvent {
-    pub pid: u32,
-    pub tid: u32,
-    pub timestamp: u64,
-    pub event_type: u32, // 0 = spawn, 1 = poll_start, 2 = poll_end
+    pub pid: u32,           // Process ID
+    pub tid: u32,           // Thread ID
+    pub timestamp_ns: u64,  // Timestamp in nanoseconds
+    pub event_type: u32,    // Event type (see constants above)
 }
 
 #[cfg(feature = "user")]

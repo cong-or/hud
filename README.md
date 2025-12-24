@@ -1,46 +1,64 @@
 # runtime-scope
 
-Real-time async runtime profiler with beautiful visualizations for Rust.
+⚠️ **Status: Early Development / Proof of Concept** ⚠️
 
-Instantly see which tasks are blocking your executor, how one slow task delays hundreds of others, and whether async is actually helping your workload.
+Real-time async runtime profiler for Rust using eBPF.
 
-## Installation
+Detect blocking operations in async code that harm executor performance. Built with pure Rust + eBPF (Aya framework).
+
+## Current Status: ✅ Phase 1 Complete
+
+**What Works:**
+- ✅ Real-time blocking detection
+- ✅ Accurate duration measurement
+- ✅ eBPF-based profiling (zero overhead when not running)
+- ✅ Process/thread tracking
+
+**Coming Soon:**
+- 🚧 Stack trace capture (see exact source location)
+- 🚧 Function name resolution
+- 🚧 Async task tracking
+- 🚧 Cascade effect visualization
+- 🚧 TUI interface
+
+## Quick Demo
 
 ```bash
-cargo install runtime-scope
+cd /home/soze/runtime-scope
+
+# Terminal 1: Run the test app
+./target/debug/examples/test-async-app
+
+# Terminal 2: Profile it
+sudo -E ./target/debug/runtime-scope \
+  --pid $(pgrep test-async-app) \
+  --target ./target/debug/examples/test-async-app
 ```
 
-## Usage
+**Output:**
+```
+🔍 runtime-scope v0.1.0
+   Real-time async runtime profiler
 
-Profile any Rust program using async/await:
+📦 Target: /home/soze/runtime-scope/target/debug/examples/test-async-app
+📊 Monitoring PID: 23646
 
-```bash
-# Profile a running process
-sudo runtime-scope --pid 1234
+👀 Watching for blocking events... (press Ctrl+C to stop)
 
-# Profile system-wide async activity
-sudo runtime-scope
-
-# Save profiling data
-sudo runtime-scope --pid 1234 --output profile.json
+🔴 [PID 23646 TID 23648] Blocking started at 5610682ms
+  ✓ [PID 23646 TID 23648] Blocking ended - Duration: 450.01ms ⚠️  SLOW!
+🔴 [PID 23646 TID 23648] Blocking started at 5612134ms
+  ✓ [PID 23646 TID 23648] Blocking ended - Duration: 450.04ms ⚠️  SLOW!
 ```
 
-**Why sudo?** The tool uses eBPF which requires root privileges to safely observe kernel events.
+**Why sudo?** eBPF requires root privileges to attach to processes and load kernel programs.
 
-### Quick Start
+## What It Currently Shows
 
-1. Start your async Rust application
-2. Find its process ID: `ps aux | grep your-app`
-3. Run: `sudo runtime-scope --pid <pid>`
-4. Watch for performance issues in real-time
-5. Press Ctrl+C to stop and see summary
-
-### What It Shows
-
-- 🔴 **Blocking tasks** - Tasks holding the executor hostage
-- 📊 **Cascade effects** - How one slow task delays hundreds of others
-- ⏱️ **Poll vs await time** - Where your tasks actually spend time
-- 💡 **Recommendations** - Actionable fixes for performance issues
+- 🔴 **Blocking detection** - When async tasks block the executor
+- ⏱️ **Duration measurement** - How long each blocking operation takes
+- 🧵 **Thread identification** - Which OS thread is affected
+- ⚠️ **Automatic flagging** - Highlights operations >10ms as SLOW
 
 ---
 
@@ -362,11 +380,57 @@ Built with:
 
 ---
 
-**Status:** 🚧 Active development - Phase 1 in progress
+## Development Roadmap
 
-**Roadmap:**
-- [x] Phase 0: Infrastructure setup
-- [ ] Phase 1: Basic task tracing
-- [ ] Phase 2: Blocking detection
-- [ ] Phase 3: TUI with health check
-- [ ] Phase 4: Cascade visualization
+**Current Phase:** ✅ Phase 1 Complete - Basic Blocking Detection Working!
+
+### Completed:
+- [x] **Phase 0:** Infrastructure setup (eBPF build system, workspace structure)
+- [x] **Phase 1:** Basic blocking detection with uprobes + ring buffers
+  - [x] Test async application with intentional blocking
+  - [x] eBPF programs with uprobes
+  - [x] Ring buffer event streaming
+  - [x] Duration calculation
+  - [x] Real-time output
+
+### Next Steps:
+- [ ] **Phase 2:** Stack trace capture & source location
+  - [ ] Capture instruction pointers with `bpf_get_stackid()`
+  - [ ] Symbol resolution (DWARF/addr2line)
+  - [ ] Show file:line for each stack frame
+  - [ ] Display function names (demangled)
+
+- [ ] **Phase 3:** Async task tracking
+  - [ ] Hook Tokio task spawn/poll
+  - [ ] Track task IDs and names
+  - [ ] Associate blocking events with specific tasks
+  - [ ] Show task spawn locations
+
+- [ ] **Phase 4:** Advanced profiling
+  - [ ] Switch from uprobes to scheduler tracepoints
+  - [ ] Works on all code (including inlined functions)
+  - [ ] Cascade effect visualization
+  - [ ] Task dependency graphs
+  - [ ] Executor health metrics
+
+- [ ] **Phase 5:** Production ready
+  - [ ] TUI interface (ratatui)
+  - [ ] Export to JSON/HTML
+  - [ ] Performance benchmarks
+  - [ ] Documentation
+  - [ ] CI/CD
+
+### Vision:
+```
+🔴 BLOCKING DETECTED
+   Duration: 450.12ms ⚠️
+   Task: "handle_upload"
+   Location: src/api.rs:142 in process_large_file()
+
+   Stack trace:
+   #0 process_large_file at src/api.rs:142
+   #1 handle_upload at src/api.rs:89
+   #2 tokio::runtime::task::poll
+
+   Impact: 247 tasks delayed
+```

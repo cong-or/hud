@@ -8,7 +8,8 @@ aya = { workspace = true }
 aya-log = { workspace = true }
 anyhow = { workspace = true }
 tokio = { workspace = true }
-runtime-scope-common = { path = "../runtime-scope-common" }
+runtime-scope-common = { path = "../runtime-scope-common", features = ["user"] }
 clap = { version = "4.5", features = ["derive"] }
 env_logger = "0.11"
 log = "0.4"
+futures = "0.3"
