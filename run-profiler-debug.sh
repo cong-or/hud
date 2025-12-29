@@ -1,0 +1,34 @@
+#!/bin/bash
+set -e
+
+echo "🔧 Building..."
+cargo build -p runtime-scope > /dev/null 2>&1
+echo "✓ Build complete"
+
+# Kill any existing test-async-app
+pkill -9 test-async-app 2>/dev/null || true
+sleep 0.5
+
+echo "🚀 Starting test-async-app..."
+./target/debug/examples/test-async-app > /tmp/test-async-app.log 2>&1 &
+APP_PID=$!
+sleep 1
+
+echo "✓ test-async-app running (PID: $APP_PID)"
+echo ""
+echo "📊 Starting profiler with DEBUG logging..."
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+cleanup() {
+    echo ""
+    echo "🧹 Cleaning up..."
+    kill $APP_PID 2>/dev/null || true
+}
+
+trap cleanup EXIT
+
+# Run with debug logging
+sudo -E env RUST_LOG=debug ./target/debug/runtime-scope \
+    --pid $APP_PID \
+    --target ./target/debug/examples/test-async-app
