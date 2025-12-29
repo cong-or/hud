@@ -6,23 +6,27 @@ Real-time async runtime profiler for Rust using eBPF.
 
 Detect blocking operations in async code that harm executor performance. Built with pure Rust + eBPF (Aya framework).
 
-## Current Status: ✅ Phase 1 Complete
+## Current Status: ✅ Phase 1 Complete + Stack Traces Working!
 
 **What Works:**
-- ✅ Real-time blocking detection
+- ✅ Real-time blocking detection (450ms operations detected)
+- ✅ **Stack trace capture with eBPF StackTrace maps**
+- ✅ **Symbol resolution using DWARF debug info**
+- ✅ **Source code locations (file:line) for each frame**
+- ✅ **Demangled Rust function names**
+- ✅ PIE executable address translation
 - ✅ Accurate duration measurement
-- ✅ eBPF-based profiling (zero overhead when not running)
 - ✅ Process/thread tracking
+- ✅ Graceful Ctrl+C shutdown
 
 **⚠️ Important Note:**
 Current implementation uses `#[no_mangle]` marker functions for learning purposes.
 **These will be removed in Phase 4** when we switch to scheduler tracepoints.
 **Production version will require ZERO code changes** - profile any binary without modification!
 
-**Coming Soon:**
-- 🚧 Stack trace capture (see exact source location)
-- 🚧 Function name resolution
-- 🚧 Async task tracking
+**Next Steps:**
+- 🚧 Show full call stack (currently shows marker function only)
+- 🚧 Async task tracking (task names, spawn locations)
 - 🎯 **Remove markers, switch to scheduler tracepoints (no code changes!)**
 - 🚧 Cascade effect visualization
 - 🚧 TUI interface
@@ -32,6 +36,10 @@ Current implementation uses `#[no_mangle]` marker functions for learning purpose
 ```bash
 cd /home/soze/runtime-scope
 
+# Easy mode: Automated script (builds, starts app, attaches profiler)
+./run-profiler.sh
+
+# Or manual mode:
 # Terminal 1: Run the test app
 ./target/debug/examples/test-async-app
 
@@ -47,14 +55,22 @@ sudo -E ./target/debug/runtime-scope \
    Real-time async runtime profiler
 
 📦 Target: /home/soze/runtime-scope/target/debug/examples/test-async-app
-📊 Monitoring PID: 23646
+📊 Monitoring PID: 17344
 
 👀 Watching for blocking events... (press Ctrl+C to stop)
 
-🔴 [PID 23646 TID 23648] Blocking started at 5610682ms
-  ✓ [PID 23646 TID 23648] Blocking ended - Duration: 450.01ms ⚠️  SLOW!
-🔴 [PID 23646 TID 23648] Blocking started at 5612134ms
-  ✓ [PID 23646 TID 23648] Blocking ended - Duration: 450.04ms ⚠️  SLOW!
+🔴 [PID 17344 TID 17366] Blocking started
+
+🔴 BLOCKING DETECTED
+   Duration: 450.02ms ⚠️
+   Process: PID 17344
+   Thread: TID 17366
+
+   📍 Stack trace:
+      #0  0x000000000002c6b0 trace_blocking_start
+                      at test-async-app.rs:59:0
+      #1  0x00002a2e0b79f088 <unknown>
+      #2  0x00002a2e0b822f8c <unknown>
 ```
 
 **Why sudo?** eBPF requires root privileges to attach to processes and load kernel programs.
@@ -62,8 +78,12 @@ sudo -E ./target/debug/runtime-scope \
 ## What It Currently Shows
 
 - 🔴 **Blocking detection** - When async tasks block the executor
-- ⏱️ **Duration measurement** - How long each blocking operation takes
+- ⏱️ **Duration measurement** - How long each blocking operation takes (accurate to ~0.01ms)
 - 🧵 **Thread identification** - Which OS thread is affected
+- 📍 **Stack traces** - Instruction pointers for each stack frame
+- 🔍 **Symbol resolution** - Function names with DWARF debug info
+- 📝 **Source locations** - File paths and line numbers
+- 🦀 **Demangled names** - Clean Rust function names (not mangled C++)
 - ⚠️ **Automatic flagging** - Highlights operations >10ms as SLOW
 
 ---
@@ -233,11 +253,14 @@ cargo build --package runtime-scope
 runtime-scope/
 ├── runtime-scope/              # Userspace profiler
 │   ├── src/
-│   │   └── main.rs            # CLI, TUI, event processing
+│   │   ├── main.rs            # CLI, event processing, PIE address handling
+│   │   └── symbolizer.rs      # DWARF symbol resolution (NEW!)
+│   ├── examples/
+│   │   └── test-async-app.rs  # Test application with blocking code
 │   └── Cargo.toml
 ├── runtime-scope-ebpf/         # eBPF programs (runs in kernel)
 │   ├── src/
-│   │   └── main.rs            # Kernel-side tracing code
+│   │   └── main.rs            # Kernel-side tracing + stack capture
 │   └── Cargo.toml
 ├── runtime-scope-common/       # Shared types
 │   ├── src/
@@ -247,6 +270,9 @@ runtime-scope/
 │   ├── src/
 │   │   └── main.rs            # Custom cargo commands
 │   └── Cargo.toml
+├── run-profiler.sh             # Quick test script (NEW!)
+├── check-symbols.sh            # Diagnostic script (NEW!)
+├── SESSION_SUMMARY.md          # Development notes (NEW!)
 ├── Cargo.toml                  # Workspace manifest
 └── README.md
 ```
@@ -388,7 +414,7 @@ Built with:
 
 ## Development Roadmap
 
-**Current Phase:** ✅ Phase 1 Complete - Basic Blocking Detection Working!
+**Current Phase:** ✅ Phase 1 + Phase 2 Mostly Complete!
 
 ### Completed:
 - [x] **Phase 0:** Infrastructure setup (eBPF build system, workspace structure)
@@ -398,13 +424,19 @@ Built with:
   - [x] Ring buffer event streaming
   - [x] Duration calculation
   - [x] Real-time output
+  - [x] Graceful Ctrl+C shutdown
+- [x] **Phase 2:** Stack trace capture & source location (mostly done!)
+  - [x] Capture instruction pointers with eBPF StackTrace maps
+  - [x] Symbol resolution (DWARF/addr2line/gimli)
+  - [x] Show file:line for each stack frame
+  - [x] Display function names (demangled with rustc-demangle)
+  - [x] PIE executable address translation
+  - [ ] Show full call stack (currently shows marker only)
 
 ### Next Steps:
-- [ ] **Phase 2:** Stack trace capture & source location
-  - [ ] Capture instruction pointers with `bpf_get_stackid()`
-  - [ ] Symbol resolution (DWARF/addr2line)
-  - [ ] Show file:line for each stack frame
-  - [ ] Display function names (demangled)
+- [ ] **Phase 2.1:** Complete stack trace implementation
+  - [ ] Show full call stack including blocking_task function
+  - [ ] Resolve more than just the top frame
 
 - [ ] **Phase 3:** Async task tracking
   - [ ] Hook Tokio task spawn/poll
