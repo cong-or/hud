@@ -1,9 +1,14 @@
 #!/bin/bash
 set -e
 
+# Build first (before sudo)
 echo "🔧 Building..."
-cargo build -p runtime-scope > /dev/null 2>&1
+cargo build -p runtime-scope 2>&1 | grep -E "(Compiling|Finished|error)" || true
 echo "✓ Build complete"
+
+# Now run with sudo
+sudo bash -c '
+set -e
 
 # Kill any existing test-async-app
 pkill -9 test-async-app 2>/dev/null || true
@@ -26,9 +31,10 @@ cleanup() {
     kill $APP_PID 2>/dev/null || true
 }
 
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 
 # Run with debug logging
-sudo -E env RUST_LOG=debug ./target/debug/runtime-scope \
+RUST_LOG=debug ./target/debug/runtime-scope \
     --pid $APP_PID \
     --target ./target/debug/examples/test-async-app
+'

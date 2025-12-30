@@ -13,7 +13,14 @@ aya-log = "0.2"
 anyhow = "1"
 tokio = { version = "1.41", features = ["full"] }
 
+[profile.dev]
+# Force frame pointers for better stack traces
+[profile.dev.package."*"]
+opt-level = 0
+
 [profile.release]
 lto = true
 opt-level = 3
 codegen-units = 1
+# Force frame pointers even in release for profiling
+force-frame-pointers = true

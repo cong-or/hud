@@ -4,39 +4,64 @@ use anyhow::{Context, Result};
 use aya::{include_bytes_aligned, maps::{RingBuf, StackTraceMap}, programs::UProbe, Ebpf};
 use aya_log::EbpfLogger;
 use clap::Parser;
-use futures::FutureExt;
 use log::{info, warn};
 use runtime_scope_common::{TaskEvent, EVENT_BLOCKING_END, EVENT_BLOCKING_START};
 use std::fs;
 use std::time::Duration;
 use symbolizer::Symbolizer;
 
-/// Get the base address of a binary from /proc/pid/maps
-fn get_base_address(pid: i32, binary_path: &str) -> Result<u64> {
+/// Memory range of a loaded binary
+#[derive(Debug, Clone, Copy)]
+struct MemoryRange {
+    start: u64,
+    end: u64,
+}
+
+impl MemoryRange {
+    fn contains(&self, addr: u64) -> bool {
+        addr >= self.start && addr < self.end
+    }
+}
+
+/// Get the memory range of a binary from /proc/pid/maps
+fn get_memory_range(pid: i32, binary_path: &str) -> Result<MemoryRange> {
     let maps_path = format!("/proc/{}/maps", pid);
     let maps = fs::read_to_string(&maps_path)
         .context(format!("Failed to read {}", maps_path))?;
 
-    // Find the FIRST mapping (offset 0) of the target binary
-    // This is the actual base address where the ELF is loaded
+    let mut start_addr = None;
+    let mut end_addr = None;
+
+    // Find ALL mappings of the target binary to get the full range
     for line in maps.lines() {
         if line.contains(binary_path) {
             // Parse the line: "start-end perms offset dev inode pathname"
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() >= 3 {
-                let offset = parts[2]; // The file offset
-                // We want the mapping with offset 0 (the base)
-                if offset == "00000000" {
-                    let range = parts[0];
-                    let start = range.split('-').next().unwrap_or("0");
-                    return u64::from_str_radix(start, 16)
-                        .context("Failed to parse base address");
+                let range = parts[0];
+                let range_parts: Vec<&str> = range.split('-').collect();
+                if range_parts.len() == 2 {
+                    let start = u64::from_str_radix(range_parts[0], 16)
+                        .context("Failed to parse range start")?;
+                    let end = u64::from_str_radix(range_parts[1], 16)
+                        .context("Failed to parse range end")?;
+
+                    // Track the minimum start and maximum end
+                    start_addr = Some(start_addr.map_or(start, |s: u64| s.min(start)));
+                    end_addr = Some(end_addr.map_or(end, |e: u64| e.max(end)));
                 }
             }
         }
     }
 
-    Err(anyhow::anyhow!("Could not find base address for {}", binary_path))
+    match (start_addr, end_addr) {
+        (Some(start), Some(end)) => {
+            info!("Executable memory range: 0x{:x} - 0x{:x} (size: {} KB)",
+                start, end, (end - start) / 1024);
+            Ok(MemoryRange { start, end })
+        }
+        _ => Err(anyhow::anyhow!("Could not find memory range for {}", binary_path))
+    }
 }
 
 #[derive(Parser)]
@@ -119,9 +144,24 @@ async fn main() -> Result<()> {
 
     info!("✓ Attached uprobe: trace_blocking_end");
 
+    // Attach uprobe to tokio::runtime::context::set_current_task_id
+    let program: &mut UProbe = bpf
+        .program_mut("set_task_id_hook")
+        .context("program not found")?
+        .try_into()?;
+    program.load()?;
+    program.attach(
+        Some("_ZN5tokio7runtime7context19set_current_task_id17h88510a52941c215fE"),
+        0,
+        &target_path,
+        args.pid,
+    )?;
+
+    info!("✓ Attached uprobe: set_current_task_id");
+
     if let Some(pid) = args.pid {
         println!("📊 Monitoring PID: {}", pid);
-        println!("   Attached to functions: trace_blocking_start, trace_blocking_end");
+        println!("   Attached to functions: trace_blocking_start, trace_blocking_end, set_current_task_id");
     } else {
         println!("📊 Monitoring all processes running: {}", target_path);
     }
@@ -129,15 +169,15 @@ async fn main() -> Result<()> {
     println!("\n👀 Watching for blocking events... (press Ctrl+C to stop)");
     println!("   💡 If no events appear, check that the target app is calling the marker functions\n");
 
-    // Get base address for PIE address resolution
-    let base_addr = if let Some(pid) = args.pid {
-        match get_base_address(pid, &target_path) {
-            Ok(addr) => {
-                info!("Found base address: 0x{:x}", addr);
-                Some(addr)
+    // Get memory range for PIE address resolution
+    let memory_range = if let Some(pid) = args.pid {
+        match get_memory_range(pid, &target_path) {
+            Ok(range) => {
+                info!("Found memory range: 0x{:x} - 0x{:x}", range.start, range.end);
+                Some(range)
             }
             Err(e) => {
-                warn!("Failed to get base address: {}. Symbol resolution may not work.", e);
+                warn!("Failed to get memory range: {}. Symbol resolution may not work.", e);
                 None
             }
         }
@@ -209,6 +249,9 @@ async fn main() -> Result<()> {
                         );
                         println!("   Process: PID {}", event.pid);
                         println!("   Thread: TID {}", event.tid);
+                        if event.task_id != 0 {
+                            println!("   Task ID: {}", event.task_id);
+                        }
 
                         // Print stack trace from blocking start
                         if let Some(stack_id) = blocking_start_stack_id {
@@ -218,31 +261,41 @@ async fn main() -> Result<()> {
                                         let frames = stack_trace.frames();
                                         if !frames.is_empty() {
                                             println!("\n   📍 Stack trace:");
+                                            info!("Stack trace has {} frames", frames.len());
+
                                             for (i, stack_frame) in frames.iter().enumerate() {
                                                 let addr = stack_frame.ip;
                                                 if addr == 0 {
+                                                    info!("Frame {} has address 0, stopping", i);
                                                     break;
                                                 }
 
-                                                // Adjust address for PIE executables
-                                                let file_offset = if let Some(base) = base_addr {
-                                                    // Only adjust if address is in the main executable range
-                                                    // (addresses starting with 0x55... or 0x56... are typically PIE)
-                                                    if addr >= base {
-                                                        let adjusted = addr - base;
-                                                        if i == 0 {
-                                                            info!("Address adjustment: 0x{:x} - 0x{:x} = 0x{:x}", addr, base, adjusted);
-                                                        }
-                                                        adjusted
+                                                // Determine if address is in main executable and adjust accordingly
+                                                let (file_offset, in_executable) = if let Some(range) = memory_range {
+                                                    if range.contains(addr) {
+                                                        // Address is in main executable, adjust to file offset
+                                                        let adjusted = addr - range.start;
+                                                        info!("Frame {}: 0x{:016x} (in executable) -> 0x{:08x}",
+                                                            i, addr, adjusted);
+                                                        (adjusted, true)
                                                     } else {
-                                                        addr
+                                                        // Address is outside executable (shared library)
+                                                        info!("Frame {}: 0x{:016x} (shared library, skipping)", i, addr);
+                                                        (addr, false)
                                                     }
                                                 } else {
-                                                    addr
+                                                    // No range info, use address as-is
+                                                    (addr, true)
                                                 };
 
-                                                let resolved = symbolizer.resolve(file_offset);
-                                                println!("      {}", resolved.format(i));
+                                                // Only try to symbolize addresses in the main executable
+                                                if in_executable {
+                                                    let resolved = symbolizer.resolve(file_offset);
+                                                    println!("      {}", resolved.format(i));
+                                                } else {
+                                                    // Show the address but don't try to symbolize shared libraries
+                                                    println!("      #{:<2} 0x{:016x} <shared library>", i, addr);
+                                                }
                                             }
                                         } else {
                                             println!("\n   ⚠️  Empty stack trace");

@@ -121,6 +121,7 @@ async fn well_behaved_task(id: u32) {
 }
 
 /// Blocking task - does CPU work without yielding (BAD!)
+#[inline(never)]
 async fn blocking_task() {
     println!("  ⚠️  Blocking task starting (this will cause problems!)");
 

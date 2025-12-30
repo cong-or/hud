@@ -18,6 +18,7 @@ pub struct TaskEvent {
     pub timestamp_ns: u64,  // Timestamp in nanoseconds
     pub event_type: u32,    // Event type (see constants above)
     pub stack_id: i64,      // Stack trace ID (from StackTrace map)
+    pub task_id: u64,       // Tokio task ID (0 if unknown)
 }
 
 #[cfg(feature = "user")]

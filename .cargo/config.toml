@@ -1,5 +1,6 @@
 [build]
 target-dir = "target"
+rustflags = ["-C", "force-frame-pointers=yes"]
 
 [alias]
 xtask = "run --package xtask --"
