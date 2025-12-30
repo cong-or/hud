@@ -12,34 +12,44 @@ use std::time::Duration;
 use tokio::time::sleep;
 
 // ==============================================================================
-// MARKER FUNCTIONS FOR EBPF TRACING (TEMPORARY - PHASE 1 ONLY)
+// MARKER FUNCTIONS FOR EBPF TRACING (PHASE 3a: DUAL DETECTION MODE)
 // ==============================================================================
-// ⚠️ THESE ARE TRAINING WHEELS - WILL BE REMOVED IN PHASE 3!
+// 🔬 PHASE 3a: Running BOTH detection methods for validation!
 //
-// Current approach (Phase 1-2):
-//   - Use #[no_mangle] marker functions
-//   - Easy to learn eBPF uprobes
-//   - Requires code modifications (not practical for users)
+// Current Status:
+//   - Marker-based detection: ✅ Active (for comparison)
+//   - Scheduler-based detection: ✅ Active (under validation)
 //
-// Production approach (Phase 3+):
-//   - Use scheduler tracepoints (sched_switch, sched_wakeup)
-//   - NO code changes required
-//   - Works on ALL code (including inlined functions)
-//   - Profile any binary without modification
+// Marker Detection (Phase 1-2):
+//   - Uses #[no_mangle] functions + eBPF uprobes
+//   - Requires explicit trace_blocking_start/end calls
+//   - Ground truth for validating scheduler detection
 //
-// Why we started with markers:
-//   - Easier to understand for learning
-//   - Get the basic pipeline working first
-//   - Then switch to production approach
+// Scheduler Detection (Phase 3a - NEW!):
+//   - Uses sched_switch tracepoint (kernel scheduler events)
+//   - Detects blocking automatically (no markers needed!)
+//   - Monitors when Tokio worker threads go off-CPU
+//   - Heuristic: thread off-CPU >5ms in TASK_RUNNING state = blocking
+//
+// How It Works (Phase 3a):
+//   1. blocking_task() calls trace_blocking_start() → 🔵 MARKER DETECTED
+//   2. blocking_task() blocks CPU for 450ms
+//   3. Scheduler switches thread off-CPU → 🟢 SCHEDULER DETECTED
+//   4. Both events shown in output for comparison!
+//
+// Success Metrics:
+//   - Scheduler should detect same events as markers
+//   - Both methods report similar durations
+//   - <10% false positives/negatives
 //
 // Timeline:
 //   Phase 1: ✅ Basic blocking detection with markers
-//   Phase 2: 🚧 Add stack traces (still with markers)
-//   Phase 3: 🎯 Remove markers, switch to scheduler tracepoints
-//   Phase 4: 🚀 Production-ready profiler (zero instrumentation)
+//   Phase 2: ✅ Stack traces + async task tracking
+//   Phase 3a: 🔬 Hybrid mode (CURRENT) - both methods active
+//   Phase 3b: 🎯 Scheduler-only (markers optional)
+//   Phase 3c: 🚀 Production (zero instrumentation)
 //
-// #[no_mangle] prevents Rust from mangling the symbol names, making them
-// easy to find with eBPF uprobes.
+// These markers will be removed in Phase 3c!
 
 #[no_mangle]
 #[inline(never)]

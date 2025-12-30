@@ -6,7 +6,7 @@ Real-time async runtime profiler for Rust using eBPF.
 
 Detect blocking operations in async code that harm executor performance. Built with pure Rust + eBPF (Aya framework).
 
-## Current Status: ✅ Phase 1 & Phase 2 Complete!
+## Current Status: ✅ Phase 1 & 2 Complete, 🚧 Phase 3a In Progress!
 
 **What Works:**
 - ✅ Real-time blocking detection (450ms operations detected)
@@ -16,19 +16,22 @@ Detect blocking operations in async code that harm executor performance. Built w
 - ✅ **Demangled Rust function names**
 - ✅ **Memory range detection** (separates executable from shared libraries)
 - ✅ **Async task tracking** - Shows which Tokio task is blocking!
-- ✅ **Thread→Task correlation** via `set_current_task_id` hook
+- ✅ **Thread→Task correlation** via `set_current_task_id` hook (optional, graceful degradation)
 - ✅ PIE executable address translation
 - ✅ Accurate duration measurement
 - ✅ Process/thread tracking
 - ✅ Graceful Ctrl+C shutdown
+- 🚧 **Phase 3a: Dual detection mode** - Scheduler-based + marker-based running simultaneously
+- 🚧 **Tokio worker thread identification** - Auto-detects tokio-runtime-w* threads
+- 🚧 **sched_switch tracepoint** - Kernel scheduler event tracking
+- 🚧 **CPU blocking detection** - Filters I/O waits, only reports TASK_RUNNING blocks >5ms
 
-**⚠️ Important Note:**
-Current implementation uses `#[no_mangle]` marker functions for learning purposes.
-**These will be removed in Phase 3** when we switch to scheduler tracepoints.
-**Production version will require ZERO code changes** - profile any binary without modification!
+**⚠️ Phase 3a Validation Mode:**
+Currently running **hybrid detection** - both marker-based (Phase 1/2) and scheduler-based (Phase 3) detection simultaneously to validate accuracy before removing markers completely.
 
 **Next Steps:**
-- 🎯 **Phase 3: Remove markers, switch to scheduler tracepoints (no code changes!)**
+- 🚧 **Phase 3b: Make scheduler detection default** (markers optional)
+- 🎯 **Phase 3c: Remove markers entirely** - profile ANY binary without modification!
 - 🚧 Task names and spawn location tracking
 - 🚧 Cascade effect visualization
 - 🚧 TUI interface
@@ -38,37 +41,45 @@ Current implementation uses `#[no_mangle]` marker functions for learning purpose
 ```bash
 cd /home/soze/runtime-scope
 
-# Easy mode: Automated script (builds, starts app, attaches profiler)
-./run-profiler-debug.sh
+# Phase 3a: Automated dual-detection test (builds, starts app, attaches profiler)
+./test.sh
 
-# Or manual mode:
-# Terminal 1: Run the test app
-./target/debug/examples/test-async-app
+# Or manual mode (Phase 3a requires release builds):
+# Terminal 1: Build everything
+cargo xtask build-ebpf --release
+cargo build --release -p runtime-scope
+cargo build --release --example test-async-app
 
-# Terminal 2: Profile it
-sudo -E ./target/debug/runtime-scope \
+# Terminal 2: Run the test app
+./target/release/examples/test-async-app
+
+# Terminal 3: Profile it
+sudo -E ./target/release/runtime-scope \
   --pid $(pgrep test-async-app) \
-  --target ./target/debug/examples/test-async-app
+  --target ./target/release/examples/test-async-app
 ```
 
-**Output:**
+**Output (Phase 3a Dual Detection Mode):**
 ```
-🔍 runtime-scope v0.1.0
+🔍 runtime-scope v0.1.0 (Phase 3a: Dual Detection)
    Real-time async runtime profiler
 
-📦 Target: /home/soze/runtime-scope/target/debug/examples/test-async-app
+📦 Target: /home/soze/runtime-scope/target/release/examples/test-async-app
 📊 Monitoring PID: 24036
-   Attached to functions: trace_blocking_start, trace_blocking_end, set_current_task_id
+   Registered 24 Tokio worker threads
+   ✓ Attached uprobe: trace_blocking_start_hook
+   ✓ Attached uprobe: trace_blocking_end_hook
+   ⚠ Attached uprobe: set_task_id_hook (optional, may be inlined)
+   ✓ Attached tracepoint: sched_switch
 
 👀 Watching for blocking events... (press Ctrl+C to stop)
 
-🔴 [PID 24036 TID 24038] Blocking started
-
-🔴 BLOCKING DETECTED
-   Duration: 450.03ms ⚠️
+🔵 MARKER DETECTED
+   Duration: 450.23ms ⚠️
    Process: PID 24036
    Thread: TID 24038
-   Task ID: 30
+   Task ID: 30 (if available)
+   Detection: Instrumentation-based
 
    📍 Stack trace:
       #0  0x000000000002c6b0 trace_blocking_start
@@ -78,6 +89,10 @@ sudo -E ./target/debug/runtime-scope \
       #2  0x000000000001d280 tokio::runtime::task::core::Core<T,S>::poll::{{closure}}
                       at task/core.rs:329:17
       ... (55 frames total showing complete call stack)
+
+📊 Detection Statistics:
+   Marker:    10
+   Scheduler: 0  (Phase 3a validation in progress)
 ```
 
 **Why sudo?** eBPF requires root privileges to attach to processes and load kernel programs.
@@ -229,24 +244,25 @@ git clone https://github.com/yourusername/runtime-scope
 cd runtime-scope
 
 # Build eBPF program (runs in kernel)
-cargo xtask build-ebpf
+# NOTE: Phase 3a requires release builds due to eBPF limitations
+cargo xtask build-ebpf --release
 
 # Build userspace program (what you run)
-cargo build --package runtime-scope
+cargo build --package runtime-scope --release
+
+# Build test application
+cargo build --release --example test-async-app
 
 # Run it
-sudo -E ./target/debug/runtime-scope
-```
-
-**Release builds:**
-
-```bash
-cargo xtask build-ebpf --release
-cargo build --package runtime-scope --release
 sudo -E ./target/release/runtime-scope
 ```
 
+**⚠️ Note on Debug Builds:**
+Phase 3a (scheduler-based detection) requires **release builds only** due to eBPF verifier limitations with debug assertions and formatting code. Use `--release` flag for all builds.
+
 ### Development Workflow
+
+**⚠️ Phase 3a Note:** All builds must use `--release` flag.
 
 **1. Make changes to the eBPF program:**
 
@@ -254,14 +270,14 @@ sudo -E ./target/release/runtime-scope
 # Edit runtime-scope-ebpf/src/main.rs
 vim runtime-scope-ebpf/src/main.rs
 
-# Rebuild eBPF
-cargo xtask build-ebpf
+# Rebuild eBPF (release required)
+cargo xtask build-ebpf --release
 
 # Rebuild userspace (embeds new eBPF bytecode)
-cargo build --package runtime-scope
+cargo build --release --package runtime-scope
 
 # Test
-sudo -E ./target/debug/runtime-scope
+sudo -E ./target/release/runtime-scope
 ```
 
 **2. Make changes to the userspace program:**
@@ -271,10 +287,10 @@ sudo -E ./target/debug/runtime-scope
 vim runtime-scope/src/main.rs
 
 # Rebuild (no need to rebuild eBPF)
-cargo build --package runtime-scope
+cargo build --release --package runtime-scope
 
 # Test
-sudo -E ./target/debug/runtime-scope
+sudo -E ./target/release/runtime-scope
 ```
 
 **3. Add shared types:**
@@ -283,9 +299,9 @@ sudo -E ./target/debug/runtime-scope
 # Edit runtime-scope-common/src/lib.rs
 vim runtime-scope-common/src/lib.rs
 
-# Rebuild everything
-cargo xtask build-ebpf
-cargo build --package runtime-scope
+# Rebuild everything (release required)
+cargo xtask build-ebpf --release
+cargo build --release --package runtime-scope
 ```
 
 ### Project Structure
@@ -313,7 +329,8 @@ runtime-scope/
 │   └── Cargo.toml
 ├── .cargo/
 │   └── config.toml             # Force frame pointers for stack unwinding
-├── run-profiler-debug.sh       # Quick test script with debug logging
+├── test.sh                     # Phase 3a dual-detection test script
+├── cleanup.sh                  # Emergency cleanup for stuck processes
 ├── check-symbols.sh            # Symbol diagnostic script
 ├── SESSION_SUMMARY.md          # Development notes
 ├── Cargo.toml                  # Workspace manifest
@@ -326,12 +343,19 @@ runtime-scope/
 # Run Rust tests
 cargo test
 
-# Test eBPF program verification
-cargo xtask build-ebpf
+# Test eBPF program verification (release required for Phase 3a)
+cargo xtask build-ebpf --release
 
-# Run on a sample async app
-cargo run --example sample-async-app &
-sudo -E ./target/debug/runtime-scope --pid $!
+# Phase 3a: Run dual detection test
+./test.sh
+
+# Or manually run on the test app
+cargo build --release --example test-async-app
+./target/release/examples/test-async-app &
+sudo -E ./target/release/runtime-scope --pid $! --target ./target/release/examples/test-async-app
+
+# Cleanup stuck processes if needed
+./cleanup.sh
 ```
 
 ### Contributing
@@ -410,26 +434,38 @@ bpf-linker --version
 
 ### Architecture
 
-**How it works:**
+**How it works (Phase 3a Dual Detection):**
 
-1. **eBPF programs** run in the Linux kernel with three active uprobes:
-   - `trace_blocking_start` - Captures when blocking begins + stack trace
-   - `trace_blocking_end` - Captures when blocking ends (calculates duration)
-   - `set_current_task_id` - Tracks thread→task mappings in real-time
+1. **eBPF programs** run in the Linux kernel with **dual detection**:
+
+   **Marker-based (Phase 1/2):**
+   - `trace_blocking_start_hook` - Captures when blocking begins + stack trace
+   - `trace_blocking_end_hook` - Captures when blocking ends (calculates duration)
+   - `set_task_id_hook` - Tracks thread→task mappings (optional, graceful degradation)
+
+   **Scheduler-based (Phase 3a):**
+   - `sched_switch_hook` - Kernel tracepoint fires on every context switch
+   - Automatically detects CPU blocking >5ms on Tokio worker threads
+   - Filters TASK_RUNNING state (ignores I/O waits)
+   - No instrumentation required in target binary!
 
 2. **Kernel-side processing** captures events:
    - Stack traces (up to 127 frames using BPF StackTrace maps)
    - Thread→Task correlation (THREAD_TASK_MAP)
+   - Thread state tracking (THREAD_STATE map for scheduler detection)
+   - Tokio worker thread registry (TOKIO_WORKER_THREADS map)
    - Precise timestamps (nanosecond resolution)
    - Process/thread identifiers
-   - Minimal CPU overhead (<1%)
+   - Minimal CPU overhead (<5% with sched_switch)
 
 3. **Userspace program** receives events via ring buffers:
+   - Auto-detects Tokio worker threads by name pattern (`tokio-runtime-w*`)
    - Resolves stack traces using DWARF debug symbols
    - Correlates blocking start/end events
    - Handles PIE address translation with memory range detection
    - Demangles Rust function names
-   - Real-time output with color coding
+   - Dual detection statistics (marker vs scheduler)
+   - Real-time output with color coding (🔵 marker, 🟢 scheduler)
 
 **Why eBPF?**
 - Zero overhead when not profiling
@@ -461,7 +497,7 @@ Built with:
 
 ## Development Roadmap
 
-**Current Phase:** ✅ Phase 1 & Phase 2 Complete!
+**Current Phase:** 🚧 Phase 3a In Progress (Dual Detection Validation)
 
 ### Completed:
 - [x] **Phase 0:** Infrastructure setup (eBPF build system, workspace structure)
@@ -485,10 +521,26 @@ Built with:
   - [x] **Thread→Task correlation** - THREAD_TASK_MAP in eBPF
   - [x] **Display task IDs** - Know which task is blocking!
 
+### In Progress:
+- [~] **Phase 3a:** Dual detection mode (validation)
+  - [x] sched_switch tracepoint implementation
+  - [x] Tokio worker thread identification
+  - [x] Thread state tracking (THREAD_STATE, TOKIO_WORKER_THREADS maps)
+  - [x] CPU blocking detection (5ms threshold, TASK_RUNNING filter)
+  - [x] Dual event display (🔵 marker, 🟢 scheduler)
+  - [x] Detection statistics tracking
+  - [ ] Validate scheduler detection accuracy (currently investigating)
+  - [ ] Tune blocking detection heuristics
+
 ### Next Steps:
-- [ ] **Phase 3:** Remove instrumentation (Critical!)
-  - [ ] **Switch from uprobes → scheduler tracepoints**
+- [ ] **Phase 3b:** Make scheduler detection default
+  - [ ] Add `--enable-marker-validation` CLI flag
+  - [ ] Conditional marker attachment
+  - [ ] Scheduler-only mode as default
+
+- [ ] **Phase 3c:** Remove markers completely (Critical!)
   - [ ] **Remove all `#[no_mangle]` markers** (no code changes needed!)
+  - [ ] Pure scheduler-based detection
   - [ ] Works on all code (including inlined functions)
   - [ ] Profile any binary without modification
 

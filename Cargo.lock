@@ -12,7 +12,7 @@ dependencies = [
  "fallible-iterator",
  "gimli",
  "memmap2",
- "object 0.36.7",
+ "object",
  "rustc-demangle",
  "smallvec",
  "typed-arena",
@@ -23,18 +23,6 @@ name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
-
-[[package]]
-name = "ahash"
-version = "0.8.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a15f179cd60c4584b8a8c596927aadc462e27f2ca70c04e0071964a73ba7a75"
-dependencies = [
- "cfg-if",
- "once_cell",
- "version_check",
- "zerocopy",
-]
 
 [[package]]
 name = "aho-corasick"
@@ -115,34 +103,17 @@ checksum = "9b34d609dfbaf33d6889b2b7106d3ca345eacad44200913df5ba02bfd31d2ba9"
 
 [[package]]
 name = "aya"
-version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90eea657cc8028447cbda5068f4e10c4fadba0131624f4f7dd1a9c46ffc8d81f"
-dependencies = [
- "assert_matches",
- "aya-obj 0.1.0",
- "bitflags",
- "bytes",
- "lazy_static",
- "libc",
- "log",
- "object 0.32.2",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "aya"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d18bc4e506fbb85ab7392ed993a7db4d1a452c71b75a246af4a80ab8c9d2dd50"
 dependencies = [
  "assert_matches",
- "aya-obj 0.2.1",
+ "aya-obj",
  "bitflags",
  "bytes",
  "libc",
  "log",
- "object 0.36.7",
+ "object",
  "once_cell",
  "thiserror 1.0.69",
  "tokio",
@@ -207,7 +178,7 @@ version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b600d806c1d07d3b81ab5f4a2a95fd80f479a0d3f1d68f29064d660865f85f02"
 dependencies = [
- "aya 0.13.1",
+ "aya",
  "aya-log-common",
  "bytes",
  "log",
@@ -259,20 +230,6 @@ dependencies = [
 
 [[package]]
 name = "aya-obj"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c02024a307161cf3d1f052161958fd13b1a33e3e038083e58082c0700fdab85"
-dependencies = [
- "bytes",
- "core-error",
- "hashbrown 0.14.5",
- "log",
- "object 0.32.2",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "aya-obj"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c51b96c5a8ed8705b40d655273bc4212cbbf38d4e3be2788f36306f154523ec7"
@@ -281,7 +238,7 @@ dependencies = [
  "core-error",
  "hashbrown 0.15.5",
  "log",
- "object 0.36.7",
+ "object",
  "thiserror 1.0.69",
 ]
 
@@ -562,16 +519,6 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
-version = "0.14.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
-dependencies = [
- "ahash",
- "allocator-api2",
-]
-
-[[package]]
-name = "hashbrown"
 version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
@@ -638,12 +585,6 @@ dependencies = [
  "quote",
  "syn",
 ]
-
-[[package]]
-name = "lazy_static"
-version = "1.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "libc"
@@ -721,15 +662,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "object"
-version = "0.32.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6a622008b6e321afc04970976f62ee297fdbaa6f95318ca343e3eebb9648441"
-dependencies = [
- "memchr",
 ]
 
 [[package]]
@@ -882,14 +814,14 @@ version = "0.1.0"
 dependencies = [
  "addr2line",
  "anyhow",
- "aya 0.13.1",
+ "aya",
  "aya-log",
  "clap",
  "env_logger",
  "futures",
  "gimli",
  "log",
- "object 0.36.7",
+ "object",
  "runtime-scope-common",
  "rustc-demangle",
  "tokio",
@@ -899,7 +831,7 @@ dependencies = [
 name = "runtime-scope-common"
 version = "0.1.0"
 dependencies = [
- "aya 0.12.0",
+ "aya",
 ]
 
 [[package]]
@@ -1266,24 +1198,4 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
-]
-
-[[package]]
-name = "zerocopy"
-version = "0.8.31"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd74ec98b9250adb3ca554bdde269adf631549f51d8a8f8f0a10b50f1cb298c3"
-dependencies = [
- "zerocopy-derive",
-]
-
-[[package]]
-name = "zerocopy-derive"
-version = "0.8.31"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8a8d209fdf45cf5138cbb5a506f6b52522a25afccc534d1475dad8e31105c6a"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]

@@ -1,41 +1,37 @@
 #!/bin/bash
-# Quick test script for runtime-scope
-
 set -e
 
-echo "======================================================================"
-echo "  runtime-scope Test Script"
-echo "======================================================================"
+echo "🧪 Phase 3a: Dual Detection Mode Test"
 echo ""
 
-# Build everything
-echo "[1/4] Building eBPF program..."
-cargo xtask build-ebpf 2>&1 | grep -E "(Compiling|Finished)" | tail -3
-
-echo "[2/4] Building userspace program..."
-cargo build --package runtime-scope 2>&1 | grep -E "(Compiling|Finished)" | tail -3
-
-echo "[3/4] Building test app..."
-cargo build --example test-async-app 2>&1 | grep -E "(Compiling|Finished)" | tail -3
-
-echo ""
-echo "======================================================================"
-echo "  Starting test..."
-echo "======================================================================"
+# Build
+echo "🔧 Building..."
+cargo xtask build-ebpf --release > /dev/null 2>&1
+cargo build --release -p runtime-scope > /dev/null 2>&1
+cargo build --release --example test-async-app > /dev/null 2>&1
+echo "✓ Build complete"
 echo ""
 
-echo "[4/4] Running test app in background..."
-./target/debug/examples/test-async-app &
+# Start test app (output to log file)
+echo "🚀 Starting test app..."
+./target/release/examples/test-async-app > /tmp/test-app.log 2>&1 &
 TEST_PID=$!
-echo "  Test app PID: $TEST_PID"
-
-# Wait a moment for it to start
 sleep 2
+echo "✓ Test app running (PID: $TEST_PID)"
+echo ""
 
+# Run profiler (you'll see output here)
+echo "📊 Starting profiler... (Press Ctrl+C to stop)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-echo "Now run runtime-scope with:"
-echo "  sudo -E ./target/debug/runtime-scope --pid $TEST_PID"
+
+sudo -E ./target/release/runtime-scope \
+  --pid $TEST_PID \
+  --target ./target/release/examples/test-async-app
+
+# Cleanup
 echo ""
-echo "Or kill the test app with:"
-echo "  kill $TEST_PID"
-echo ""
+echo "🧹 Cleaning up..."
+kill $TEST_PID 2>/dev/null || true
+pkill -9 test-async-app 2>/dev/null || true
+echo "✓ Done"

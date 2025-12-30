@@ -1,13 +1,21 @@
 mod symbolizer;
 
 use anyhow::{Context, Result};
-use aya::{include_bytes_aligned, maps::{RingBuf, StackTraceMap}, programs::UProbe, Ebpf};
+use aya::{
+    include_bytes_aligned,
+    maps::{HashMap, RingBuf, StackTraceMap},
+    programs::{TracePoint, UProbe},
+    Ebpf,
+};
 use aya_log::EbpfLogger;
 use clap::Parser;
 use log::{info, warn};
-use runtime_scope_common::{TaskEvent, EVENT_BLOCKING_END, EVENT_BLOCKING_START};
+use runtime_scope_common::{
+    TaskEvent, WorkerInfo, ThreadState,
+    EVENT_BLOCKING_END, EVENT_BLOCKING_START, EVENT_SCHEDULER_DETECTED,
+};
 use std::fs;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use symbolizer::Symbolizer;
 
 /// Memory range of a loaded binary
@@ -62,6 +70,72 @@ fn get_memory_range(pid: i32, binary_path: &str) -> Result<MemoryRange> {
         }
         _ => Err(anyhow::anyhow!("Could not find memory range for {}", binary_path))
     }
+}
+
+/// Identify Tokio worker threads by reading /proc/pid/task/*/comm
+/// Phase 3a: Finds threads with names starting with "tokio-runtime-w"
+fn identify_tokio_workers(pid: i32) -> Result<Vec<u32>> {
+    let task_dir = format!("/proc/{}/task", pid);
+    let mut worker_tids = Vec::new();
+
+    let entries = fs::read_dir(&task_dir)
+        .context(format!("Failed to read {}", task_dir))?;
+
+    for entry in entries {
+        let entry = entry?;
+        let tid_str = entry.file_name().to_string_lossy().to_string();
+
+        if let Ok(tid) = tid_str.parse::<u32>() {
+            let comm_path = format!("/proc/{}/task/{}/comm", pid, tid);
+
+            if let Ok(comm) = fs::read_to_string(comm_path) {
+                let comm = comm.trim();
+                if comm.starts_with("tokio-runtime-w") {
+                    worker_tids.push(tid);
+                    info!("Found Tokio worker thread: TID {} ({})", tid, comm);
+                }
+            }
+        }
+    }
+
+    Ok(worker_tids)
+}
+
+/// Register Tokio worker threads in the TOKIO_WORKER_THREADS eBPF map
+/// Phase 3a: Populates the map so eBPF can filter sched_switch events
+fn register_tokio_workers(bpf: &mut Ebpf, pid: i32) -> Result<usize> {
+    let worker_tids = identify_tokio_workers(pid)?;
+
+    if worker_tids.is_empty() {
+        warn!("No Tokio worker threads found! Make sure the target is a Tokio app.");
+        return Ok(0);
+    }
+
+    let mut map: HashMap<_, u32, WorkerInfo> = HashMap::try_from(
+        bpf.map_mut("TOKIO_WORKER_THREADS")
+            .context("TOKIO_WORKER_THREADS map not found")?
+    )?;
+
+    for (idx, tid) in worker_tids.iter().enumerate() {
+        let mut comm = [0u8; 16];
+        let comm_str = format!("tokio-runtime-w");
+        let bytes = comm_str.as_bytes();
+        let copy_len = bytes.len().min(16);
+        comm[..copy_len].copy_from_slice(&bytes[..copy_len]);
+
+        let info = WorkerInfo {
+            worker_id: idx as u32,
+            pid: pid as u32,
+            comm,
+            is_active: 1,
+            _padding: [0u8; 3],
+        };
+
+        map.insert(*tid, info, 0)?;
+    }
+
+    info!("✓ Registered {} Tokio worker threads", worker_tids.len());
+    Ok(worker_tids.len())
 }
 
 #[derive(Parser)]
@@ -145,25 +219,84 @@ async fn main() -> Result<()> {
     info!("✓ Attached uprobe: trace_blocking_end");
 
     // Attach uprobe to tokio::runtime::context::set_current_task_id
-    let program: &mut UProbe = bpf
-        .program_mut("set_task_id_hook")
-        .context("program not found")?
-        .try_into()?;
-    program.load()?;
-    program.attach(
-        Some("_ZN5tokio7runtime7context19set_current_task_id17h88510a52941c215fE"),
-        0,
-        &target_path,
-        args.pid,
-    )?;
+    // Note: This symbol may not exist in release builds (gets inlined)
+    // Task ID tracking will be unavailable if the symbol is not found
+    let task_id_attached = match bpf.program_mut("set_task_id_hook") {
+        Some(program) => {
+            match program.try_into() {
+                Ok(program) => {
+                    let program: &mut UProbe = program;
+                    if let Err(e) = program.load() {
+                        warn!("⚠️  Failed to load set_task_id_hook: {}", e);
+                        false
+                    } else {
+                        match program.attach(
+                            Some("_ZN5tokio7runtime7context19set_current_task_id17h88510a52941c215fE"),
+                            0,
+                            &target_path,
+                            args.pid,
+                        ) {
+                            Ok(_) => {
+                                info!("✓ Attached uprobe: set_current_task_id");
+                                true
+                            }
+                            Err(e) => {
+                                warn!("⚠️  Could not attach set_task_id_hook: {}", e);
+                                warn!("   Task ID tracking unavailable (symbol likely inlined in release build)");
+                                false
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("⚠️  Failed to convert set_task_id_hook: {}", e);
+                    false
+                }
+            }
+        }
+        None => {
+            warn!("⚠️  set_task_id_hook program not found");
+            false
+        }
+    };
 
-    info!("✓ Attached uprobe: set_current_task_id");
+    if !task_id_attached {
+        println!("⚠️  Note: Task IDs will not be available (set_current_task_id inlined in release build)");
+    }
 
+    // Phase 3a: Setup scheduler-based detection
     if let Some(pid) = args.pid {
+        println!("\n🔧 Phase 3a: Setting up scheduler-based detection...");
+
+        // 1. Set configuration (5ms threshold)
+        let mut config_map: HashMap<_, u32, u64> = HashMap::try_from(
+            bpf.map_mut("CONFIG").context("CONFIG map not found")?
+        )?;
+        config_map.insert(0, 5_000_000, 0)?;  // 5ms threshold in nanoseconds
+        info!("✓ Set blocking threshold: 5ms");
+
+        // 2. Identify and register Tokio worker threads
+        let worker_count = register_tokio_workers(&mut bpf, pid)?;
+
+        // 3. Attach sched_switch tracepoint
+        let program: &mut TracePoint = bpf
+            .program_mut("sched_switch_hook")
+            .context("sched_switch_hook program not found")?
+            .try_into()?;
+        program.load()?;
+        program.attach("sched", "sched_switch")?;
+        info!("✓ Attached tracepoint: sched/sched_switch");
+
+        println!("✅ Scheduler-based detection active");
+        println!("   Monitoring {} Tokio worker threads\n", worker_count);
+
         println!("📊 Monitoring PID: {}", pid);
-        println!("   Attached to functions: trace_blocking_start, trace_blocking_end, set_current_task_id");
+        println!("   Marker detection: trace_blocking_start, trace_blocking_end");
+        println!("   Scheduler detection: sched_switch tracepoint (5ms threshold)");
+        println!("   Task tracking: set_current_task_id");
     } else {
         println!("📊 Monitoring all processes running: {}", target_path);
+        println!("   Note: Scheduler-based detection requires --pid argument");
     }
 
     println!("\n👀 Watching for blocking events... (press Ctrl+C to stop)");
@@ -197,11 +330,20 @@ async fn main() -> Result<()> {
         bpf.take_map("STACK_TRACES").context("stack trace map not found")?
     )?;
 
-    // Track blocking durations and stack IDs
+    // Track blocking durations and stack IDs (for marker detection)
     let mut blocking_start_time: Option<u64> = None;
     let mut blocking_start_stack_id: Option<i64> = None;
     let mut event_count = 0;
-    let mut last_status_time = std::time::Instant::now();
+    let mut last_status_time = Instant::now();
+
+    // Phase 3a: Statistics tracking
+    #[derive(Default)]
+    struct DetectionStats {
+        marker_detected: u64,
+        scheduler_detected: u64,
+    }
+    let mut stats = DetectionStats::default();
+    let mut stats_timer = Instant::now();
 
     // Setup Ctrl+C handler
     let ctrl_c = tokio::signal::ctrl_c();
@@ -242,7 +384,9 @@ async fn main() -> Result<()> {
                         let duration_ns = event.timestamp_ns - start_time;
                         let duration_ms = duration_ns as f64 / 1_000_000.0;
 
-                        println!("\n🔴 BLOCKING DETECTED");
+                        stats.marker_detected += 1;  // Phase 3a: Track marker stats
+
+                        println!("\n🔵 MARKER DETECTED");
                         println!("   Duration: {:.2}ms {}",
                             duration_ms,
                             if duration_ms > 10.0 { "⚠️" } else { "" }
@@ -321,10 +465,96 @@ async fn main() -> Result<()> {
                         );
                     }
                 }
+                EVENT_SCHEDULER_DETECTED => {
+                    // Phase 3a: Scheduler-based detection
+                    stats.scheduler_detected += 1;
+
+                    let duration_ms = event.duration_ns as f64 / 1_000_000.0;
+
+                    println!("\n🟢 SCHEDULER DETECTED");
+                    println!("   Duration: {:.2}ms (off-CPU) {}",
+                        duration_ms,
+                        if duration_ms > 10.0 { "⚠️" } else { "" }
+                    );
+                    println!("   Process: PID {}", event.pid);
+                    println!("   Thread: TID {}", event.tid);
+                    if event.task_id != 0 {
+                        println!("   Task ID: {}", event.task_id);
+                    }
+
+                    // Decode thread state
+                    let state_str = match event.thread_state {
+                        0 => "TASK_RUNNING (CPU blocking)",
+                        1 => "TASK_INTERRUPTIBLE (I/O wait)",
+                        2 => "TASK_UNINTERRUPTIBLE",
+                        _ => "UNKNOWN",
+                    };
+                    println!("   State: {}", state_str);
+
+                    // Print stack trace
+                    if event.stack_id >= 0 {
+                        match stack_traces.get(&(event.stack_id as u32), 0) {
+                            Ok(stack_trace) => {
+                                let frames = stack_trace.frames();
+                                if !frames.is_empty() {
+                                    println!("\n   📍 Stack trace:");
+                                    info!("Stack trace has {} frames", frames.len());
+
+                                    for (i, stack_frame) in frames.iter().enumerate() {
+                                        let addr = stack_frame.ip;
+                                        if addr == 0 {
+                                            info!("Frame {} has address 0, stopping", i);
+                                            break;
+                                        }
+
+                                        let (file_offset, in_executable) = if let Some(range) = memory_range {
+                                            if range.contains(addr) {
+                                                let adjusted = addr - range.start;
+                                                info!("Frame {}: 0x{:016x} (in executable) -> 0x{:08x}",
+                                                    i, addr, adjusted);
+                                                (adjusted, true)
+                                            } else {
+                                                info!("Frame {}: 0x{:016x} (shared library, skipping)", i, addr);
+                                                (addr, false)
+                                            }
+                                        } else {
+                                            (addr, true)
+                                        };
+
+                                        if in_executable {
+                                            let resolved = symbolizer.resolve(file_offset);
+                                            println!("      {}", resolved.format(i));
+                                        } else {
+                                            println!("      #{:<2} 0x{:016x} <shared library>", i, addr);
+                                        }
+                                    }
+                                } else {
+                                    println!("\n   ⚠️  Empty stack trace");
+                                }
+                            }
+                            Err(e) => {
+                                println!("\n   ⚠️  Failed to read stack trace: {}", e);
+                            }
+                        }
+                    } else {
+                        println!("\n   ⚠️  No stack trace captured (stack_id = {})", event.stack_id);
+                    }
+
+                    println!();
+                }
                 _ => {
                     warn!("Unknown event type: {}", event.event_type);
                 }
             }
+        }
+
+        // Phase 3a: Print statistics every 10 seconds
+        if stats_timer.elapsed() > Duration::from_secs(10) {
+            println!("\n📊 Detection Statistics (last 10s):");
+            println!("   Marker:    {}", stats.marker_detected);
+            println!("   Scheduler: {}", stats.scheduler_detected);
+            println!();
+            stats_timer = Instant::now();
         }
 
         // Use select to handle both sleep and Ctrl+C
