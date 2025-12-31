@@ -3,9 +3,17 @@
 // Shared data structures between eBPF and userspace
 
 /// Event types for runtime profiling
+///
+/// Legacy events (Phase 1-2): Marker-based blocking detection
 pub const EVENT_BLOCKING_START: u32 = 1;
 pub const EVENT_BLOCKING_END: u32 = 2;
 pub const EVENT_SCHEDULER_DETECTED: u32 = 3;
+
+/// New events (Phase 3+): Timeline visualization
+pub const TRACE_EXECUTION_START: u32 = 10;  // Worker starts executing
+pub const TRACE_EXECUTION_END: u32 = 11;    // Worker stops executing
+pub const TRACE_FUNCTION_SAMPLE: u32 = 12;  // Periodic stack sample
+pub const TRACE_WORKER_METADATA: u32 = 13;  // Worker info event
 
 /// Maximum number of stack frames to capture
 pub const MAX_STACK_DEPTH: usize = 127;
@@ -14,16 +22,32 @@ pub const MAX_STACK_DEPTH: usize = 127;
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct TaskEvent {
+    // Core identification
     pub pid: u32,           // Process ID
     pub tid: u32,           // Thread ID
     pub timestamp_ns: u64,  // Timestamp in nanoseconds
     pub event_type: u32,    // Event type (see constants above)
+
+    // Stack trace
     pub stack_id: i64,      // Stack trace ID (from StackTrace map)
-    pub task_id: u64,       // Tokio task ID (0 if unknown)
-    pub duration_ns: u64,   // Duration of blocking (for scheduler detection)
+
+    // Duration and timing
+    pub duration_ns: u64,   // Duration (for span events)
+
+    // Worker context (NEW for timeline viz)
+    pub worker_id: u32,     // Tokio worker ID (0-23, or u32::MAX if not a worker)
+    pub cpu_id: u32,        // CPU core where event occurred
+
+    // Thread state
     pub thread_state: i64,  // Linux thread state (prev_state from sched_switch)
-    pub detection_method: u8, // 1=marker, 2=scheduler
-    pub _padding: [u8; 7],  // Padding for alignment
+
+    // Metadata
+    pub task_id: u64,       // Tokio task ID (0 if unknown)
+    pub category: u8,       // Category: 0=general, 1=database, 2=network, 3=compute
+    pub detection_method: u8, // 1=marker, 2=scheduler, 3=trace
+    pub is_tokio_worker: u8,  // 1 if Tokio worker thread, 0 otherwise
+
+    pub _padding: [u8; 5],  // Padding for alignment
 }
 
 /// Thread execution state (for scheduler-based detection)
@@ -58,6 +82,28 @@ pub struct WorkerInfo {
     pub _padding: [u8; 3], // Padding for alignment
 }
 
+/// Execution span tracking (for timeline visualization)
+/// Tracks when a worker starts executing and what it's executing
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct ExecutionSpan {
+    pub start_time_ns: u64,  // When execution started
+    pub stack_id: i64,       // Stack trace at start
+    pub cpu_id: u32,         // CPU core
+    pub _padding: [u8; 4],   // Padding for alignment
+}
+
+impl Default for ExecutionSpan {
+    fn default() -> Self {
+        Self {
+            start_time_ns: 0,
+            stack_id: -1,
+            cpu_id: 0,
+            _padding: [0; 4],
+        }
+    }
+}
+
 /// Tracepoint arguments for sched_switch
 /// Layout from /sys/kernel/debug/tracing/events/sched/sched_switch/format
 #[repr(C)]
@@ -83,3 +129,6 @@ unsafe impl Pod for ThreadState {}
 
 #[cfg(feature = "user")]
 unsafe impl Pod for WorkerInfo {}
+
+#[cfg(feature = "user")]
+unsafe impl Pod for ExecutionSpan {}

@@ -138,19 +138,23 @@ async fn blocking_task() {
     for _round in 0..10 {
         sleep(Duration::from_secs(1)).await;
 
-        println!("  🔴 Blocking task doing CPU work (450ms without yielding)...");
+        println!("  🔴 Blocking task doing heavy CPU work...");
 
         // eBPF trace point: blocking starts
         trace_blocking_start();
 
-        // Simulate blocking CPU work - NO await, just pure computation
-        // This will block the executor thread for ~450ms
-        let start = std::time::Instant::now();
+        // TEST: Heavy CPU-bound work that will get preempted by scheduler
+        // This should trigger TASK_RUNNING state detection!
+        // We do enough work to take ~500ms, forcing scheduler preemptions
         let mut result = 0u64;
+        let start = std::time::Instant::now();
 
-        // Busy loop for about 450ms
-        while start.elapsed() < Duration::from_millis(450) {
-            result = result.wrapping_add((0..10000).sum::<u64>());
+        // Do heavy computation until we've burned ~500ms of CPU time
+        while start.elapsed() < Duration::from_millis(500) {
+            // Heavy work: lots of iterations to force real CPU usage
+            for _ in 0..100_000 {
+                result = result.wrapping_add(std::hint::black_box(1));
+            }
         }
 
         // eBPF trace point: blocking ends

@@ -9,8 +9,9 @@ use aya_ebpf::{
     EbpfContext,
 };
 use runtime_scope_common::{
-    TaskEvent, ThreadState, WorkerInfo, SchedSwitchArgs,
+    TaskEvent, ThreadState, WorkerInfo, SchedSwitchArgs, ExecutionSpan,
     EVENT_BLOCKING_START, EVENT_BLOCKING_END, EVENT_SCHEDULER_DETECTED,
+    TRACE_EXECUTION_START, TRACE_EXECUTION_END,
 };
 
 // Ring buffer for sending events to userspace
@@ -42,6 +43,13 @@ static TOKIO_WORKER_THREADS: HashMap<u32, WorkerInfo> = HashMap::with_max_entrie
 // Configuration from userspace (threshold, etc.)
 #[map]
 static CONFIG: HashMap<u32, u64> = HashMap::with_max_entries(16, 0);
+
+// Phase 3+: Timeline visualization maps
+
+// Map: Thread ID (TID) → Current execution span
+// Tracks what each worker is currently executing for timeline viz
+#[map]
+static EXECUTION_SPANS: HashMap<u32, ExecutionSpan> = HashMap::with_max_entries(256, 0);
 
 /// Hook: trace_blocking_start()
 #[uprobe]
@@ -81,11 +89,15 @@ fn try_trace_blocking_start(ctx: &ProbeContext) -> Result<(), i64> {
         timestamp_ns,
         event_type: EVENT_BLOCKING_START,
         stack_id,
-        task_id,
         duration_ns: 0,          // Will be calculated in userspace
+        worker_id: get_worker_id(tid),
+        cpu_id: get_cpu_id(),
         thread_state: 0,         // Not applicable for marker detection
+        task_id,
+        category: 0,             // 0 = general
         detection_method: 1,     // 1 = marker-based
-        _padding: [0u8; 7],
+        is_tokio_worker: if is_tokio_worker(tid) { 1 } else { 0 },
+        _padding: [0u8; 5],
     };
 
     // Send to userspace via ring buffer
@@ -132,11 +144,15 @@ fn try_trace_blocking_end(ctx: &ProbeContext) -> Result<(), i64> {
         timestamp_ns,
         event_type: EVENT_BLOCKING_END,
         stack_id,
-        task_id,
         duration_ns: 0,          // Will be calculated in userspace
+        worker_id: get_worker_id(tid),
+        cpu_id: get_cpu_id(),
         thread_state: 0,         // Not applicable for marker detection
+        task_id,
+        category: 0,             // 0 = general
         detection_method: 1,     // 1 = marker-based
-        _padding: [0u8; 7],
+        is_tokio_worker: if is_tokio_worker(tid) { 1 } else { 0 },
+        _padding: [0u8; 5],
     };
 
     // Send to userspace via ring buffer
@@ -204,7 +220,24 @@ fn try_sched_switch(ctx: &TracePointContext) -> Result<(), i64> {
 }
 
 fn handle_thread_off_cpu(tid: u32, state: i64, now: u64) -> Result<(), i64> {
-    // Get or create thread state
+    // Phase 3+: Emit execution end event for Tokio workers
+    if is_tokio_worker(tid) {
+        // Get execution span if it exists
+        let span = unsafe { EXECUTION_SPANS.get(&tid).map(|s| *s) };
+
+        if let Some(span) = span {
+            // Calculate execution duration
+            let duration_ns = now - span.start_time_ns;
+
+            // Emit TRACE_EXECUTION_END event
+            emit_execution_end(tid, now, duration_ns, span.stack_id)?;
+
+            // Clear execution span
+            unsafe { EXECUTION_SPANS.remove(&tid)?; }
+        }
+    }
+
+    // Update thread state (for legacy scheduler-based detection)
     let mut thread_state = unsafe {
         THREAD_STATE
             .get(&tid)
@@ -229,7 +262,28 @@ fn handle_thread_on_cpu(tid: u32, now: u64, ctx: &TracePointContext) -> Result<(
         return Ok(());
     }
 
-    // Get thread state
+    // Phase 3+: Track execution span and emit start event
+    let stack_id = unsafe {
+        STACK_TRACES.get_stackid(ctx, 0x100).unwrap_or(-1)
+    };
+    let cpu_id = get_cpu_id();
+
+    // Create execution span
+    let span = ExecutionSpan {
+        start_time_ns: now,
+        stack_id,
+        cpu_id,
+        _padding: [0; 4],
+    };
+
+    unsafe {
+        EXECUTION_SPANS.insert(&tid, &span, 0)?;
+    }
+
+    // Emit TRACE_EXECUTION_START event
+    emit_execution_start(tid, now, stack_id)?;
+
+    // Get thread state (for legacy scheduler-based detection)
     let mut thread_state = unsafe {
         THREAD_STATE
             .get(&tid)
@@ -244,11 +298,11 @@ fn handle_thread_on_cpu(tid: u32, now: u64, ctx: &TracePointContext) -> Result<(
         // BLOCKING DETECTION HEURISTIC
         let threshold_ns = get_threshold_ns();
 
-        // Only report if:
-        // 1. Duration exceeds threshold (5ms)
-        // 2. Thread was in TASK_RUNNING state (CPU blocking, not I/O wait)
+        // Only report CPU-bound blocking (TASK_RUNNING state)
+        // This filters out async yields and I/O waits (TASK_INTERRUPTIBLE)
+        // When scheduler preempts a CPU-bound task, state = TASK_RUNNING (0)
         if thread_state.off_cpu_duration > threshold_ns
-            && thread_state.state_when_switched == 0 {  // TASK_RUNNING
+            && thread_state.state_when_switched == 0 {  // TASK_RUNNING only
 
             let task_id = unsafe {
                 THREAD_TASK_MAP.get(&tid).map(|id| *id).unwrap_or(0)
@@ -300,11 +354,15 @@ fn report_scheduler_blocking(
         timestamp_ns: unsafe { bpf_ktime_get_ns() },
         event_type: EVENT_SCHEDULER_DETECTED,
         stack_id,
-        task_id,
         duration_ns,
+        worker_id: get_worker_id(tid),
+        cpu_id: get_cpu_id(),
         thread_state,
+        task_id,
+        category: 0,          // 0 = general
         detection_method: 2,  // 2 = scheduler-based
-        _padding: [0u8; 7],
+        is_tokio_worker: 1,   // Only workers trigger scheduler detection
+        _padding: [0u8; 5],
     };
 
     unsafe {
@@ -312,6 +370,99 @@ fn report_scheduler_blocking(
     }
 
     Ok(())
+}
+
+// Helper: Emit TRACE_EXECUTION_START event
+fn emit_execution_start(tid: u32, timestamp_ns: u64, stack_id: i64) -> Result<(), i64> {
+    let pid_tgid = unsafe { bpf_get_current_pid_tgid() };
+    let pid = (pid_tgid >> 32) as u32;
+
+    let task_id = unsafe {
+        THREAD_TASK_MAP.get(&tid).map(|id| *id).unwrap_or(0)
+    };
+
+    let event = TaskEvent {
+        pid,
+        tid,
+        timestamp_ns,
+        event_type: TRACE_EXECUTION_START,
+        stack_id,
+        duration_ns: 0,  // Not applicable for start event
+        worker_id: get_worker_id(tid),
+        cpu_id: get_cpu_id(),
+        thread_state: 0,
+        task_id,
+        category: 0,             // 0 = general
+        detection_method: 3,     // 3 = trace
+        is_tokio_worker: 1,
+        _padding: [0u8; 5],
+    };
+
+    unsafe {
+        EVENTS.output(&event, 0).map_err(|_| 1i64)?;
+    }
+
+    Ok(())
+}
+
+// Helper: Emit TRACE_EXECUTION_END event
+fn emit_execution_end(
+    tid: u32,
+    timestamp_ns: u64,
+    duration_ns: u64,
+    stack_id: i64,
+) -> Result<(), i64> {
+    let pid_tgid = unsafe { bpf_get_current_pid_tgid() };
+    let pid = (pid_tgid >> 32) as u32;
+
+    let task_id = unsafe {
+        THREAD_TASK_MAP.get(&tid).map(|id| *id).unwrap_or(0)
+    };
+
+    let event = TaskEvent {
+        pid,
+        tid,
+        timestamp_ns,
+        event_type: TRACE_EXECUTION_END,
+        stack_id,
+        duration_ns,
+        worker_id: get_worker_id(tid),
+        cpu_id: get_cpu_id(),
+        thread_state: 0,
+        task_id,
+        category: 0,             // 0 = general
+        detection_method: 3,     // 3 = trace
+        is_tokio_worker: 1,
+        _padding: [0u8; 5],
+    };
+
+    unsafe {
+        EVENTS.output(&event, 0).map_err(|_| 1i64)?;
+    }
+
+    Ok(())
+}
+
+// Helper: Get worker ID for a TID (or u32::MAX if not a worker)
+fn get_worker_id(tid: u32) -> u32 {
+    unsafe {
+        TOKIO_WORKER_THREADS
+            .get(&tid)
+            .map(|info| info.worker_id)
+            .unwrap_or(u32::MAX)
+    }
+}
+
+// Helper: Check if TID is a Tokio worker
+fn is_tokio_worker(tid: u32) -> bool {
+    unsafe { TOKIO_WORKER_THREADS.get(&tid).is_some() }
+}
+
+// Helper: Get CPU ID (using aya's helper when available)
+fn get_cpu_id() -> u32 {
+    // aya-ebpf doesn't expose bpf_get_smp_processor_id directly yet
+    // For now, return 0 (we can add this later with raw bpf call)
+    0
 }
 
 #[panic_handler]
