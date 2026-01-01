@@ -1,0 +1,208 @@
+use anyhow::{Context, Result};
+use runtime_scope_common::{TaskEvent, TRACE_EXECUTION_END, TRACE_EXECUTION_START};
+use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::BufWriter;
+use std::path::Path;
+
+use crate::symbolizer::Symbolizer;
+
+/// Chrome Trace Event format
+/// Spec: https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ChromeTraceEvent {
+    /// Event name (usually function name)
+    name: String,
+    /// Category for filtering/coloring
+    cat: String,
+    /// Phase: "B" = begin, "E" = end, "X" = complete, "I" = instant
+    ph: String,
+    /// Timestamp in microseconds
+    ts: f64,
+    /// Process ID
+    pid: u32,
+    /// Thread ID
+    tid: u32,
+    /// Optional arguments (metadata)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    args: Option<HashMap<String, JsonValue>>,
+}
+
+/// Chrome Trace Format container
+#[derive(Debug, Serialize)]
+struct ChromeTrace {
+    #[serde(rename = "traceEvents")]
+    trace_events: Vec<ChromeTraceEvent>,
+    #[serde(rename = "displayTimeUnit")]
+    display_time_unit: String,
+}
+
+/// Chrome trace exporter for timeline visualization
+pub struct ChromeTraceExporter {
+    /// Collected trace events
+    events: Vec<ChromeTraceEvent>,
+    /// Symbolizer for resolving stack traces
+    symbolizer: Symbolizer,
+    /// Cache for resolved symbols (stack_id -> function name)
+    symbol_cache: HashMap<i64, String>,
+    /// Memory range for address adjustment
+    memory_range: Option<MemoryRange>,
+    /// Start timestamp for relative timing (in nanoseconds)
+    start_timestamp_ns: Option<u64>,
+}
+
+/// Memory range of a loaded binary
+#[derive(Debug, Clone, Copy)]
+pub struct MemoryRange {
+    pub start: u64,
+    pub end: u64,
+}
+
+impl MemoryRange {
+    pub fn contains(&self, addr: u64) -> bool {
+        addr >= self.start && addr < self.end
+    }
+}
+
+impl ChromeTraceExporter {
+    /// Create a new Chrome trace exporter
+    pub fn new(symbolizer: Symbolizer) -> Self {
+        Self {
+            events: Vec::new(),
+            symbolizer,
+            symbol_cache: HashMap::new(),
+            memory_range: None,
+            start_timestamp_ns: None,
+        }
+    }
+
+    /// Set the memory range for PIE address adjustment
+    pub fn set_memory_range(&mut self, range: MemoryRange) {
+        self.memory_range = Some(range);
+    }
+
+    /// Resolve a symbol from a stack trace
+    fn resolve_symbol(&mut self, stack_id: i64, addr: u64) -> String {
+        // Check cache first
+        if let Some(cached) = self.symbol_cache.get(&stack_id) {
+            return cached.clone();
+        }
+
+        // Determine if address is in main executable and adjust accordingly
+        let (file_offset, in_executable) = if let Some(range) = self.memory_range {
+            if range.contains(addr) {
+                // Address is in main executable, adjust to file offset
+                (addr - range.start, true)
+            } else {
+                // Address is outside executable (shared library)
+                (addr, false)
+            }
+        } else {
+            // No range info, use address as-is
+            (addr, true)
+        };
+
+        let function_name = if in_executable {
+            // Resolve the symbol
+            let resolved = self.symbolizer.resolve(file_offset);
+
+            // Get the outermost (non-inlined) function name
+            resolved.frames.first()
+                .map(|f| f.function.clone())
+                .unwrap_or_else(|| format!("0x{:x}", addr))
+        } else {
+            // For shared libraries, just show address
+            format!("<shared:0x{:x}>", addr)
+        };
+
+        // Cache the result
+        self.symbol_cache.insert(stack_id, function_name.clone());
+        function_name
+    }
+
+    /// Add a task event to the trace
+    pub fn add_event(&mut self, event: &TaskEvent, top_frame_addr: Option<u64>) {
+        // Initialize start timestamp on first event
+        if self.start_timestamp_ns.is_none() {
+            self.start_timestamp_ns = Some(event.timestamp_ns);
+        }
+
+        let start_ts = self.start_timestamp_ns.unwrap();
+
+        // Convert timestamp from nanoseconds to microseconds (relative to start)
+        let ts_us = if event.timestamp_ns >= start_ts {
+            (event.timestamp_ns - start_ts) as f64 / 1000.0
+        } else {
+            0.0
+        };
+
+        match event.event_type {
+            TRACE_EXECUTION_START => {
+                // Resolve function name from stack trace
+                let function_name = if let Some(addr) = top_frame_addr {
+                    self.resolve_symbol(event.stack_id, addr)
+                } else {
+                    format!("trace_{}", event.stack_id)
+                };
+
+                // Create metadata args
+                let mut args = HashMap::new();
+                args.insert("worker_id".to_string(), serde_json::json!(event.worker_id));
+                args.insert("cpu_id".to_string(), serde_json::json!(event.cpu_id));
+                if event.task_id != 0 {
+                    args.insert("task_id".to_string(), serde_json::json!(event.task_id));
+                }
+
+                self.events.push(ChromeTraceEvent {
+                    name: function_name,
+                    cat: "execution".to_string(),
+                    ph: "B".to_string(),  // Begin
+                    ts: ts_us,
+                    pid: event.pid,
+                    tid: event.tid,
+                    args: Some(args),
+                });
+            }
+            TRACE_EXECUTION_END => {
+                // For end events, we use a generic name since we don't have stack trace
+                // The Chrome viewer will match it with the corresponding Begin event
+                self.events.push(ChromeTraceEvent {
+                    name: "execution".to_string(),
+                    cat: "execution".to_string(),
+                    ph: "E".to_string(),  // End
+                    ts: ts_us,
+                    pid: event.pid,
+                    tid: event.tid,
+                    args: None,
+                });
+            }
+            _ => {
+                // Ignore other event types for now
+            }
+        }
+    }
+
+    /// Export the trace to a JSON file
+    pub fn export<P: AsRef<Path>>(&self, output_path: P) -> Result<()> {
+        let trace = ChromeTrace {
+            trace_events: self.events.clone(),
+            display_time_unit: "ms".to_string(),
+        };
+
+        let file = File::create(output_path.as_ref())
+            .context("Failed to create trace output file")?;
+        let writer = BufWriter::new(file);
+
+        serde_json::to_writer_pretty(writer, &trace)
+            .context("Failed to write trace JSON")?;
+
+        Ok(())
+    }
+
+    /// Get the number of events collected
+    pub fn event_count(&self) -> usize {
+        self.events.len()
+    }
+}

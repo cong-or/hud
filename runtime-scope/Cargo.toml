@@ -18,3 +18,6 @@ addr2line = "0.24"
 object = { version = "0.36", default-features = false, features = ["read_core", "elf"] }
 rustc-demangle = "0.1"
 gimli = "0.31"
+# Chrome trace export
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

@@ -824,6 +824,8 @@ dependencies = [
  "object",
  "runtime-scope-common",
  "rustc-demangle",
+ "serde",
+ "serde_json",
  "tokio",
 ]
 

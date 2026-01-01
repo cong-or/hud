@@ -1,4 +1,5 @@
 mod symbolizer;
+mod trace_exporter;
 
 use anyhow::{Context, Result};
 use aya::{
@@ -11,12 +12,15 @@ use aya_log::EbpfLogger;
 use clap::Parser;
 use log::{info, warn};
 use runtime_scope_common::{
-    TaskEvent, WorkerInfo, ThreadState,
+    TaskEvent, WorkerInfo,
     EVENT_BLOCKING_END, EVENT_BLOCKING_START, EVENT_SCHEDULER_DETECTED,
+    TRACE_EXECUTION_START, TRACE_EXECUTION_END,
 };
 use std::fs;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use symbolizer::Symbolizer;
+use trace_exporter::{ChromeTraceExporter, MemoryRange as ExporterMemoryRange};
 
 /// Memory range of a loaded binary
 #[derive(Debug, Clone, Copy)]
@@ -149,6 +153,18 @@ struct Args {
         help = "Path to target binary (defaults to test-async-app)"
     )]
     target: Option<String>,
+
+    #[arg(long, help = "Enable Chrome trace export")]
+    trace: bool,
+
+    #[arg(long, default_value = "30", help = "Duration to profile in seconds (when using --trace)")]
+    duration: u64,
+
+    #[arg(long, default_value = "trace.json", help = "Output path for trace JSON")]
+    trace_output: PathBuf,
+
+    #[arg(long, help = "Trace-only mode (no live event output)")]
+    no_live: bool,
 }
 
 #[tokio::main]
@@ -322,6 +338,25 @@ async fn main() -> Result<()> {
     let symbolizer = Symbolizer::new(&target_path)
         .context("Failed to create symbolizer")?;
 
+    // Initialize Chrome trace exporter if requested
+    let mut trace_exporter = if args.trace {
+        let mut exporter = ChromeTraceExporter::new(Symbolizer::new(&target_path)?);
+        if let Some(range) = memory_range {
+            exporter.set_memory_range(ExporterMemoryRange {
+                start: range.start,
+                end: range.end,
+            });
+        }
+        println!("\n📊 Chrome trace export enabled");
+        println!("   Duration: {}s", args.duration);
+        println!("   Output: {}", args.trace_output.display());
+        Some(exporter)
+    } else {
+        None
+    };
+
+    let live_display = !args.no_live;
+
     // Get the ring buffer
     let mut ring_buf = RingBuf::try_from(bpf.take_map("EVENTS").context("map not found")?)?;
 
@@ -349,8 +384,41 @@ async fn main() -> Result<()> {
     let ctrl_c = tokio::signal::ctrl_c();
     tokio::pin!(ctrl_c);
 
+    // Track start time for duration limit
+    let profiling_start = Instant::now();
+    let duration_limit = if args.trace {
+        Some(Duration::from_secs(args.duration))
+    } else {
+        None
+    };
+
+    // Show progress indicator for trace mode
+    if args.trace && !live_display {
+        println!("\n⏱️  Collecting trace for {} seconds...", args.duration);
+        println!("   (This will run silently until complete)");
+        println!("   Start time: {:?}", profiling_start);
+    }
+
+    // Track progress updates
+    let mut last_progress_time = Instant::now();
+    let mut timeout_reached = false;
+
     // Read events from the ring buffer
     loop {
+        // Check for duration timeout FIRST
+        if let Some(limit) = duration_limit {
+            let elapsed = profiling_start.elapsed();
+            if elapsed >= limit {
+                if args.trace && !live_display {
+                    println!("\r   ✓ Collection complete! ({}s elapsed)                  ", elapsed.as_secs());
+                } else {
+                    println!("\n\n✓ Duration limit reached ({}s), shutting down", args.duration);
+                }
+                println!("  Processed {} events", event_count);
+                break;
+            }
+        }
+
         // Print status every 10 seconds if no events
         if event_count == 0 && last_status_time.elapsed() > Duration::from_secs(10) {
             info!("Still waiting for events... (no events received yet)");
@@ -358,6 +426,7 @@ async fn main() -> Result<()> {
         }
         // Process all available events
         while let Some(item) = ring_buf.next() {
+
             event_count += 1;
             let bytes: &[u8] = &item;
             if bytes.len() < std::mem::size_of::<TaskEvent>() {
@@ -542,6 +611,46 @@ async fn main() -> Result<()> {
 
                     println!();
                 }
+                TRACE_EXECUTION_START | TRACE_EXECUTION_END => {
+                    // Get the top frame address for symbol resolution
+                    let top_frame_addr = if event.stack_id >= 0 {
+                        match stack_traces.get(&(event.stack_id as u32), 0) {
+                            Ok(stack_trace) => {
+                                let frames = stack_trace.frames();
+                                frames.iter().find(|f| f.ip != 0).map(|f| f.ip)
+                            }
+                            Err(_) => None,
+                        }
+                    } else {
+                        None
+                    };
+
+                    // Add to trace exporter if enabled
+                    if let Some(ref mut exporter) = trace_exporter {
+                        exporter.add_event(&event, top_frame_addr);
+                    }
+
+                    // Optionally display live (unless --no-live)
+                    if live_display {
+                        let event_name = if event.event_type == TRACE_EXECUTION_START {
+                            "EXEC_START"
+                        } else {
+                            "EXEC_END"
+                        };
+
+                        println!(
+                            "🟣 {} [PID {} TID {} Worker {}]",
+                            event_name,
+                            event.pid,
+                            event.tid,
+                            if event.worker_id != u32::MAX {
+                                event.worker_id.to_string()
+                            } else {
+                                "N/A".to_string()
+                            }
+                        );
+                    }
+                }
                 _ => {
                     warn!("Unknown event type: {}", event.event_type);
                 }
@@ -557,6 +666,21 @@ async fn main() -> Result<()> {
             stats_timer = Instant::now();
         }
 
+        // Show progress when in quiet trace mode
+        if args.trace && !live_display && last_progress_time.elapsed() > Duration::from_secs(2) {
+            if let Some(limit) = duration_limit {
+                let elapsed = profiling_start.elapsed();
+                let remaining = limit.saturating_sub(elapsed);
+                let elapsed_secs = elapsed.as_secs();
+                let remaining_secs = remaining.as_secs();
+                print!("\r   Progress: {}s / {}s ({}s remaining)   ",
+                    elapsed_secs, args.duration, remaining_secs);
+                use std::io::Write;
+                std::io::stdout().flush().ok();
+                last_progress_time = Instant::now();
+            }
+        }
+
         // Use select to handle both sleep and Ctrl+C
         tokio::select! {
             _ = tokio::time::sleep(Duration::from_millis(100)) => {
@@ -568,6 +692,21 @@ async fn main() -> Result<()> {
                 break;
             }
         }
+    }
+
+    // Export trace if enabled
+    if let Some(exporter) = trace_exporter {
+        println!("\n📝 Exporting Chrome trace...");
+        println!("   Events collected: {}", exporter.event_count());
+
+        exporter.export(&args.trace_output)
+            .context("Failed to export trace")?;
+
+        println!("   ✓ Trace exported to: {}", args.trace_output.display());
+        println!("\n💡 To visualize:");
+        println!("   1. Open chrome://tracing in Chrome/Chromium");
+        println!("   2. Click 'Load' and select {}", args.trace_output.display());
+        println!("   3. Use W/A/S/D to zoom/pan the timeline");
     }
 
     Ok(())
