@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use aya::{
     include_bytes_aligned,
     maps::{HashMap, RingBuf, StackTraceMap},
-    programs::{TracePoint, UProbe},
+    programs::{perf_event, PerfEvent, TracePoint, UProbe},
     Ebpf,
 };
 use aya_log::EbpfLogger;
@@ -74,6 +74,26 @@ fn get_memory_range(pid: i32, binary_path: &str) -> Result<MemoryRange> {
         }
         _ => Err(anyhow::anyhow!("Could not find memory range for {}", binary_path))
     }
+}
+
+/// Get list of online CPU IDs
+fn online_cpus() -> Result<Vec<u32>> {
+    let content = fs::read_to_string("/sys/devices/system/cpu/online")
+        .context("Failed to read online CPUs")?;
+
+    let mut cpus = Vec::new();
+    for range in content.trim().split(',') {
+        if let Some((start, end)) = range.split_once('-') {
+            let start: u32 = start.parse()?;
+            let end: u32 = end.parse()?;
+            for cpu in start..=end {
+                cpus.push(cpu);
+            }
+        } else {
+            cpus.push(range.parse()?);
+        }
+    }
+    Ok(cpus)
 }
 
 /// Identify Tokio worker threads by reading /proc/pid/task/*/comm
@@ -303,8 +323,31 @@ async fn main() -> Result<()> {
         program.attach("sched", "sched_switch")?;
         info!("✓ Attached tracepoint: sched/sched_switch");
 
+        // 4. Attach CPU sampling perf_event for stack traces
+        let program: &mut PerfEvent = bpf
+            .program_mut("on_cpu_sample")
+            .context("on_cpu_sample program not found")?
+            .try_into()?;
+        program.load()?;
+
+        // Attach perf_event sampler at 99 Hz for our specific PID on each CPU
+        // We need one perf_event per CPU to ensure coverage
+        let online_cpus = online_cpus()?;
+        info!("Attaching perf_event sampler to {} CPUs at 99 Hz for PID {}", online_cpus.len(), pid);
+        for cpu in &online_cpus {
+            program.attach(
+                perf_event::PerfTypeId::Software,
+                perf_event::perf_sw_ids::PERF_COUNT_SW_CPU_CLOCK as u64,
+                perf_event::PerfEventScope::OneProcessOneCpu { pid: pid as u32, cpu: *cpu },  // Target our process on each CPU
+                perf_event::SamplePolicy::Frequency(99),  // 99 Hz sampling
+                true,  // inherit: whether child processes inherit this perf event
+            )?;
+        }
+        info!("✓ Attached perf_event sampler to {} CPUs at 99 Hz for PID {}", online_cpus.len(), pid);
+
         println!("✅ Scheduler-based detection active");
-        println!("   Monitoring {} Tokio worker threads\n", worker_count);
+        println!("   Monitoring {} Tokio worker threads", worker_count);
+        println!("   CPU sampling: 99 Hz (every ~10ms)\n");
 
         println!("📊 Monitoring PID: {}", pid);
         println!("   Marker detection: trace_blocking_start, trace_blocking_end");

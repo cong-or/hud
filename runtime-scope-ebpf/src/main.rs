@@ -2,9 +2,9 @@
 #![no_main]
 
 use aya_ebpf::{
-    macros::{map, tracepoint, uprobe},
+    macros::{map, perf_event, tracepoint, uprobe},
     maps::{HashMap, RingBuf, StackTrace},
-    programs::{ProbeContext, TracePointContext},
+    programs::{ProbeContext, PerfEventContext, TracePointContext},
     helpers::{bpf_ktime_get_ns, bpf_get_current_pid_tgid},
     EbpfContext,
 };
@@ -67,10 +67,10 @@ fn try_trace_blocking_start(ctx: &ProbeContext) -> Result<(), i64> {
     let tid = pid_tgid as u32;           // Thread ID (PID)
     let timestamp_ns = unsafe { bpf_ktime_get_ns() };
 
-    // Capture stack trace - use BPF_F_USER_STACK (0x100) flag
+    // Capture stack trace - use BPF_F_USER_STACK (0x100) | BPF_F_FAST_STACK_CMP (0x200)
     let stack_id = unsafe {
         STACK_TRACES
-            .get_stackid(ctx, 0x100)
+            .get_stackid(ctx, 0x300)
             .unwrap_or(-1)
     };
 
@@ -122,10 +122,10 @@ fn try_trace_blocking_end(ctx: &ProbeContext) -> Result<(), i64> {
     let tid = pid_tgid as u32;           // Thread ID (PID)
     let timestamp_ns = unsafe { bpf_ktime_get_ns() };
 
-    // Capture stack trace - use BPF_F_USER_STACK (0x100) flag
+    // Capture stack trace - use BPF_F_USER_STACK (0x100) | BPF_F_FAST_STACK_CMP (0x200)
     let stack_id = unsafe {
         STACK_TRACES
-            .get_stackid(ctx, 0x100)
+            .get_stackid(ctx, 0x300)
             .unwrap_or(-1)
     };
 
@@ -263,8 +263,9 @@ fn handle_thread_on_cpu(tid: u32, now: u64, ctx: &TracePointContext) -> Result<(
     }
 
     // Phase 3+: Track execution span and emit start event
+    // Use BPF_F_USER_STACK (0x100) | BPF_F_FAST_STACK_CMP (0x200) for better unwinding
     let stack_id = unsafe {
-        STACK_TRACES.get_stackid(ctx, 0x100).unwrap_or(-1)
+        STACK_TRACES.get_stackid(ctx, 0x300).unwrap_or(-1)
     };
     let cpu_id = get_cpu_id();
 
@@ -309,7 +310,7 @@ fn handle_thread_on_cpu(tid: u32, now: u64, ctx: &TracePointContext) -> Result<(
             };
 
             let stack_id = unsafe {
-                STACK_TRACES.get_stackid(ctx, 0x100).unwrap_or(-1)
+                STACK_TRACES.get_stackid(ctx, 0x300).unwrap_or(-1)
             };
 
             report_scheduler_blocking(
@@ -463,6 +464,70 @@ fn get_cpu_id() -> u32 {
     // aya-ebpf doesn't expose bpf_get_smp_processor_id directly yet
     // For now, return 0 (we can add this later with raw bpf call)
     0
+}
+
+/// CPU Sampling Profiler - Captures stack traces via perf_event
+/// This replaces sched_switch for timeline visualization
+/// Samples at configurable frequency (e.g., 99 Hz)
+#[perf_event]
+pub fn on_cpu_sample(ctx: PerfEventContext) -> u32 {
+    match try_on_cpu_sample(&ctx) {
+        Ok(_) => 0,
+        Err(_) => 1,
+    }
+}
+
+fn try_on_cpu_sample(ctx: &PerfEventContext) -> Result<(), i64> {
+    // Get current process/thread info
+    let pid_tgid = unsafe { bpf_get_current_pid_tgid() };
+    let pid = (pid_tgid >> 32) as u32;
+    let tid = pid_tgid as u32;
+
+    // Only sample Tokio worker threads
+    if !is_tokio_worker(tid) {
+        return Ok(());
+    }
+
+    let timestamp_ns = unsafe { bpf_ktime_get_ns() };
+
+    // Capture stack trace - perf_event context has pt_regs, so this should work!
+    // Use BPF_F_USER_STACK (0x100) | BPF_F_FAST_STACK_CMP (0x200)
+    let stack_id = unsafe {
+        STACK_TRACES.get_stackid(ctx, 0x300).unwrap_or(-1)
+    };
+
+    let worker_id = get_worker_id(tid);
+    let cpu_id = get_cpu_id();
+
+    // Get current task ID if available
+    let task_id = unsafe {
+        THREAD_TASK_MAP.get(&tid).map(|id| *id).unwrap_or(0)
+    };
+
+    // Emit a sample event
+    // We'll use TRACE_EXECUTION_START with a special marker to indicate it's a sample
+    let event = TaskEvent {
+        pid,
+        tid,
+        timestamp_ns,
+        event_type: TRACE_EXECUTION_START,
+        stack_id,
+        duration_ns: 0,  // Samples don't have duration
+        worker_id,
+        cpu_id,
+        thread_state: 0,
+        task_id,
+        category: 0,
+        detection_method: 4,  // 4 = perf_event sampling
+        is_tokio_worker: 1,
+        _padding: [0u8; 5],
+    };
+
+    unsafe {
+        EVENTS.output(&event, 0).map_err(|_| 1i64)?;
+    }
+
+    Ok(())
 }
 
 #[panic_handler]

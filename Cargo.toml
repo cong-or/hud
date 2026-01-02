@@ -22,5 +22,5 @@ opt-level = 0
 lto = true
 opt-level = 3
 codegen-units = 1
-# Force frame pointers even in release for profiling
-force-frame-pointers = true
+# Enable debug symbols for stack trace resolution
+debug = true

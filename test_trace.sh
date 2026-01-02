@@ -10,17 +10,17 @@ echo "🔐 Requesting sudo access..."
 sudo -v
 echo ""
 
-# Build everything
+# Build everything with frame pointers for stack traces
 echo "📦 Building eBPF program..."
-cargo xtask build-ebpf --release
+RUSTFLAGS="-C force-frame-pointers=yes" cargo xtask build-ebpf --release
 
 echo ""
 echo "📦 Building runtime-scope..."
-cargo build --release -p runtime-scope
+RUSTFLAGS="-C force-frame-pointers=yes" cargo build --release -p runtime-scope
 
 echo ""
-echo "📦 Building test-async-app..."
-cargo build --release --example test-async-app
+echo "📦 Building test-async-app (with debug symbols)..."
+RUSTFLAGS="-C force-frame-pointers=yes" cargo build --release --example test-async-app
 
 echo ""
 echo "🚀 Starting test-async-app..."
@@ -33,7 +33,8 @@ echo "   (App output redirected to /tmp/test-async-app.log)"
 sleep 2
 
 echo ""
-echo "🔬 Running profiler with trace export (10 seconds)..."
+echo "🔬 Running profiler with CPU sampling + trace export (10 seconds)..."
+echo "   Method: perf_event sampling at 99 Hz"
 echo "   Output: trace.json"
 echo ""
 
