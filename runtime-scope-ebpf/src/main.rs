@@ -51,6 +51,19 @@ static CONFIG: HashMap<u32, u64> = HashMap::with_max_entries(16, 0);
 #[map]
 static EXECUTION_SPANS: HashMap<u32, ExecutionSpan> = HashMap::with_max_entries(256, 0);
 
+// DEBUG: Counters to verify perf_event is being called and track filtering
+#[map]
+static PERF_EVENT_COUNTER: HashMap<u32, u64> = HashMap::with_max_entries(1, 0);
+
+#[map]
+static PERF_EVENT_PASSED_PID_FILTER: HashMap<u32, u64> = HashMap::with_max_entries(1, 0);
+
+#[map]
+static PERF_EVENT_OUTPUT_SUCCESS: HashMap<u32, u64> = HashMap::with_max_entries(1, 0);
+
+#[map]
+static PERF_EVENT_OUTPUT_FAILED: HashMap<u32, u64> = HashMap::with_max_entries(1, 0);
+
 /// Hook: trace_blocking_start()
 #[uprobe]
 pub fn trace_blocking_start_hook(ctx: ProbeContext) -> u32 {
@@ -478,15 +491,39 @@ pub fn on_cpu_sample(ctx: PerfEventContext) -> u32 {
 }
 
 fn try_on_cpu_sample(ctx: &PerfEventContext) -> Result<(), i64> {
+    // DEBUG: Increment counter to verify perf_event is being called
+    unsafe {
+        let key = 0u32;
+        let current = PERF_EVENT_COUNTER.get(&key).map(|v| *v).unwrap_or(0);
+        let _ = PERF_EVENT_COUNTER.insert(&key, &(current + 1), 0);
+    }
+
     // Get current process/thread info
     let pid_tgid = unsafe { bpf_get_current_pid_tgid() };
     let pid = (pid_tgid >> 32) as u32;
     let tid = pid_tgid as u32;
 
-    // Only sample Tokio worker threads
-    if !is_tokio_worker(tid) {
+    // Filter by target PID (since we're using AllProcessesOneCpu scope)
+    // CONFIG[1] contains the target PID set by userspace
+    let target_pid = unsafe {
+        CONFIG.get(&1).map(|v| *v as u32).unwrap_or(0)
+    };
+    if target_pid != 0 && pid != target_pid {
         return Ok(());
     }
+
+    // DEBUG: Track how many events pass PID filter
+    unsafe {
+        let key = 0u32;
+        let current = PERF_EVENT_PASSED_PID_FILTER.get(&key).map(|v| *v).unwrap_or(0);
+        let _ = PERF_EVENT_PASSED_PID_FILTER.insert(&key, &(current + 1), 0);
+    }
+
+    // DEBUG: Temporarily disable Tokio worker filter to test if perf_event fires
+    // Once we confirm perf_event works, we'll re-enable this filter
+    // if !is_tokio_worker(tid) {
+    //     return Ok(());
+    // }
 
     let timestamp_ns = unsafe { bpf_ktime_get_ns() };
 
@@ -523,10 +560,23 @@ fn try_on_cpu_sample(ctx: &PerfEventContext) -> Result<(), i64> {
         _padding: [0u8; 5],
     };
 
+    let output_result = unsafe {
+        EVENTS.output(&event, 0)
+    };
+
+    // DEBUG: Track event output success/failure
     unsafe {
-        EVENTS.output(&event, 0).map_err(|_| 1i64)?;
+        let key = 0u32;
+        if output_result.is_ok() {
+            let current = PERF_EVENT_OUTPUT_SUCCESS.get(&key).map(|v| *v).unwrap_or(0);
+            let _ = PERF_EVENT_OUTPUT_SUCCESS.insert(&key, &(current + 1), 0);
+        } else {
+            let current = PERF_EVENT_OUTPUT_FAILED.get(&key).map(|v| *v).unwrap_or(0);
+            let _ = PERF_EVENT_OUTPUT_FAILED.insert(&key, &(current + 1), 0);
+        }
     }
 
+    output_result.map_err(|_| 1i64)?;
     Ok(())
 }
 

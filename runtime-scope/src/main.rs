@@ -304,12 +304,14 @@ async fn main() -> Result<()> {
     if let Some(pid) = args.pid {
         println!("\n🔧 Phase 3a: Setting up scheduler-based detection...");
 
-        // 1. Set configuration (5ms threshold)
+        // 1. Set configuration (5ms threshold and target PID)
         let mut config_map: HashMap<_, u32, u64> = HashMap::try_from(
             bpf.map_mut("CONFIG").context("CONFIG map not found")?
         )?;
         config_map.insert(0, 5_000_000, 0)?;  // 5ms threshold in nanoseconds
+        config_map.insert(1, pid as u64, 0)?;  // target PID for perf_event filtering
         info!("✓ Set blocking threshold: 5ms");
+        info!("✓ Set target PID: {}", pid);
 
         // 2. Identify and register Tokio worker threads
         let worker_count = register_tokio_workers(&mut bpf, pid)?;
@@ -330,20 +332,20 @@ async fn main() -> Result<()> {
             .try_into()?;
         program.load()?;
 
-        // Attach perf_event sampler at 99 Hz for our specific PID on each CPU
-        // We need one perf_event per CPU to ensure coverage
+        // Attach perf_event sampler at 99 Hz on all CPUs
+        // Using AllProcessesOneCpu with PID filtering in eBPF (more reliable)
         let online_cpus = online_cpus()?;
-        info!("Attaching perf_event sampler to {} CPUs at 99 Hz for PID {}", online_cpus.len(), pid);
+        info!("Attaching perf_event sampler to {} CPUs at 99 Hz (filtering for PID {})", online_cpus.len(), pid);
         for cpu in &online_cpus {
             program.attach(
                 perf_event::PerfTypeId::Software,
                 perf_event::perf_sw_ids::PERF_COUNT_SW_CPU_CLOCK as u64,
-                perf_event::PerfEventScope::OneProcessOneCpu { pid: pid as u32, cpu: *cpu },  // Target our process on each CPU
+                perf_event::PerfEventScope::AllProcessesOneCpu { cpu: *cpu },  // Sample all processes, filter in eBPF
                 perf_event::SamplePolicy::Frequency(99),  // 99 Hz sampling
-                true,  // inherit: whether child processes inherit this perf event
+                false,  // Don't inherit to child processes
             )?;
         }
-        info!("✓ Attached perf_event sampler to {} CPUs at 99 Hz for PID {}", online_cpus.len(), pid);
+        info!("✓ Attached perf_event sampler to {} CPUs at 99 Hz (filtering for PID {})", online_cpus.len(), pid);
 
         println!("✅ Scheduler-based detection active");
         println!("   Monitoring {} Tokio worker threads", worker_count);
@@ -734,6 +736,45 @@ async fn main() -> Result<()> {
                 println!("  Processed {} events", event_count);
                 break;
             }
+        }
+    }
+
+    // DEBUG: Check perf_event counters to track event flow
+    if args.pid.is_some() {
+        println!("\n🔍 DEBUG: perf_event diagnostics:");
+
+        // Total calls
+        let counter_map: HashMap<_, u32, u64> = HashMap::try_from(
+            bpf.map("PERF_EVENT_COUNTER").context("PERF_EVENT_COUNTER map not found")?
+        )?;
+        if let Ok(count) = counter_map.get(&0u32, 0) {
+            println!("   - Handler called: {} times", count);
+        }
+
+        // Passed PID filter
+        let pid_filter_map: HashMap<_, u32, u64> = HashMap::try_from(
+            bpf.map("PERF_EVENT_PASSED_PID_FILTER").context("PERF_EVENT_PASSED_PID_FILTER map not found")?
+        )?;
+        if let Ok(count) = pid_filter_map.get(&0u32, 0) {
+            println!("   - Passed PID filter: {} times", count);
+        } else {
+            println!("   - Passed PID filter: 0 times (ALL FILTERED OUT!)");
+        }
+
+        // Output success
+        let success_map: HashMap<_, u32, u64> = HashMap::try_from(
+            bpf.map("PERF_EVENT_OUTPUT_SUCCESS").context("PERF_EVENT_OUTPUT_SUCCESS map not found")?
+        )?;
+        if let Ok(count) = success_map.get(&0u32, 0) {
+            println!("   - Events output success: {}", count);
+        }
+
+        // Output failed
+        let failed_map: HashMap<_, u32, u64> = HashMap::try_from(
+            bpf.map("PERF_EVENT_OUTPUT_FAILED").context("PERF_EVENT_OUTPUT_FAILED map not found")?
+        )?;
+        if let Ok(count) = failed_map.get(&0u32, 0) {
+            println!("   - Events output failed: {}", count);
         }
     }
 

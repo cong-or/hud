@@ -141,7 +141,10 @@ impl ChromeTraceExporter {
         match event.event_type {
             TRACE_EXECUTION_START => {
                 // Resolve function name from stack trace
-                let function_name = if let Some(addr) = top_frame_addr {
+                let function_name = if event.stack_id < 0 {
+                    // Stack capture failed (from sched_switch which can't capture user stacks)
+                    "execution".to_string()
+                } else if let Some(addr) = top_frame_addr {
                     self.resolve_symbol(event.stack_id, addr)
                 } else {
                     format!("trace_{}", event.stack_id)
@@ -153,6 +156,10 @@ impl ChromeTraceExporter {
                 args.insert("cpu_id".to_string(), serde_json::json!(event.cpu_id));
                 if event.task_id != 0 {
                     args.insert("task_id".to_string(), serde_json::json!(event.task_id));
+                }
+                // Add detection_method to distinguish between sched_switch and perf_event samples
+                if event.detection_method != 0 {
+                    args.insert("detection_method".to_string(), serde_json::json!(event.detection_method));
                 }
 
                 self.events.push(ChromeTraceEvent {
@@ -168,6 +175,14 @@ impl ChromeTraceExporter {
             TRACE_EXECUTION_END => {
                 // For end events, we use a generic name since we don't have stack trace
                 // The Chrome viewer will match it with the corresponding Begin event
+                // Add worker_id to help identify which worker this belongs to
+                let mut args = HashMap::new();
+                args.insert("worker_id".to_string(), serde_json::json!(event.worker_id));
+                args.insert("cpu_id".to_string(), serde_json::json!(event.cpu_id));
+                if event.detection_method != 0 {
+                    args.insert("detection_method".to_string(), serde_json::json!(event.detection_method));
+                }
+
                 self.events.push(ChromeTraceEvent {
                     name: "execution".to_string(),
                     cat: "execution".to_string(),
@@ -175,7 +190,7 @@ impl ChromeTraceExporter {
                     ts: ts_us,
                     pid: event.pid,
                     tid: event.tid,
-                    args: None,
+                    args: Some(args),
                 });
             }
             _ => {
@@ -186,8 +201,37 @@ impl ChromeTraceExporter {
 
     /// Export the trace to a JSON file
     pub fn export<P: AsRef<Path>>(&self, output_path: P) -> Result<()> {
+        // Add metadata events for thread names
+        let mut all_events = self.events.clone();
+
+        // Collect unique (pid, tid, worker_id) tuples
+        let mut threads: HashMap<(u32, u32), u32> = HashMap::new();
+        for event in &self.events {
+            if let Some(ref args) = event.args {
+                if let Some(worker_id) = args.get("worker_id").and_then(|v| v.as_u64()) {
+                    threads.insert((event.pid, event.tid), worker_id as u32);
+                }
+            }
+        }
+
+        // Generate thread name metadata events
+        for ((pid, tid), worker_id) in threads {
+            let mut args = HashMap::new();
+            args.insert("name".to_string(), serde_json::json!(format!("Worker {}", worker_id)));
+
+            all_events.push(ChromeTraceEvent {
+                name: "thread_name".to_string(),
+                cat: "".to_string(),
+                ph: "M".to_string(),  // Metadata
+                ts: 0.0,
+                pid,
+                tid,
+                args: Some(args),
+            });
+        }
+
         let trace = ChromeTrace {
-            trace_events: self.events.clone(),
+            trace_events: all_events,
             display_time_unit: "ms".to_string(),
         };
 
