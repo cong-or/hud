@@ -21,3 +21,6 @@ gimli = "0.31"
 # Chrome trace export
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+# TUI for intuitive visualization
+ratatui = "0.29"
+crossterm = "0.28"

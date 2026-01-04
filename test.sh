@@ -27,7 +27,8 @@ echo ""
 
 sudo -E ./target/release/runtime-scope \
   --pid $TEST_PID \
-  --target ./target/release/examples/test-async-app
+  --target ./target/release/examples/test-async-app \
+  --trace
 
 # Cleanup
 echo ""

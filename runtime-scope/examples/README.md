@@ -1,103 +1,155 @@
 # Test Async Applications
 
-Example applications for testing and demonstrating runtime-scope.
+Example applications for testing and demonstrating runtime-scope's glass cockpit TUI and profiling capabilities.
 
 ## test-async-app
 
-A comprehensive test application with intentional good and bad async behavior.
+A comprehensive test application designed to exercise runtime-scope's profiling features.
 
 ### What it does
 
-- **10 well-behaved tasks**: Lots of `await` calls, minimal CPU work
-- **1 blocking task**: Does 450ms of CPU work without yielding (every second)
-- **200+ quick tasks**: Spawned in bursts throughout the run
-- **Runs for ~40 seconds** total
-- **Marker functions**: Instrumented with `trace_blocking_start/end` for eBPF hooking
+- **10 well-behaved async tasks**: Lots of `await` calls, minimal CPU work
+- **1 blocking task**: Does 450ms of CPU work without yielding (creates hot function for profiling)
+- **200+ quick tasks**: Spawned in bursts to create varied activity patterns
+- **Runs continuously** until stopped
+- **Marker functions**: Instrumented with `trace_blocking_start/end` for demonstration
 
 ### Running the test
+
+**Quick start (recommended):**
+
+```bash
+cd /home/soze/runtime-scope
+./test.sh
+```
+
+This will:
+1. Build everything (eBPF + userspace + test app)
+2. Start test-async-app in the background
+3. Profile it and generate `trace.json`
+4. Press **Ctrl+C** when you want to stop
+
+Then view the results:
+
+```bash
+# Glass Cockpit TUI (recommended for instant insights)
+./target/release/runtime-scope --tui trace.json
+
+# Or Chrome Timeline (for deep temporal analysis)
+google-chrome chrome://tracing  # then load trace.json
+```
+
+**Manual mode:**
 
 **Terminal 1: Start the test app**
 ```bash
 cd /home/soze/runtime-scope
-cargo run --example test-async-app
+cargo build --release --example test-async-app
+./target/release/examples/test-async-app
 ```
 
 You'll see:
 - Tasks starting and running smoothly
-- Every ~1 second: blocking task announces it's doing 450ms CPU work
-- Other tasks continue (but may be delayed during blocking)
+- Every ~1 second: blocking task does CPU work
+- Activity continues with varied patterns
 
-**Terminal 2: Profile it with runtime-scope** ✅ WORKING!
-
-**Easy mode (recommended):**
-```bash
-cd /home/soze/runtime-scope
-./run-profiler.sh  # Builds everything and runs automatically
-```
-
-**Manual mode:**
+**Terminal 2: Profile with runtime-scope**
 ```bash
 cd /home/soze/runtime-scope
 
 # Build everything first
-cargo xtask build-ebpf
-cargo build --package runtime-scope
+cargo xtask build-ebpf --release
+cargo build --release -p runtime-scope
 
 # Run the profiler (requires sudo for eBPF)
-sudo -E ./target/debug/runtime-scope \
+sudo -E ./target/release/runtime-scope \
   --pid $(pgrep test-async-app) \
-  --target ./target/debug/examples/test-async-app
+  --target ./target/release/examples/test-async-app \
+  --trace
+
+# View in glass cockpit TUI
+./target/release/runtime-scope --tui trace.json
 ```
 
 ### Expected Output
 
+**During profiling:**
 ```
-🔍 runtime-scope v0.1.0
-   Real-time async runtime profiler
+🔍 runtime-scope
+📊 Profiling PID 12345 for 30 seconds...
+⏱️  Collecting events... [████████░░] 20s
+```
 
-📦 Target: /home/soze/runtime-scope/target/debug/examples/test-async-app
-📊 Monitoring PID: 17344
+**In the Glass Cockpit TUI:**
 
-👀 Watching for blocking events... (press Ctrl+C to stop)
-
-🔴 [PID 17344 TID 17366] Blocking started
-
-🔴 BLOCKING DETECTED
-   Duration: 450.02ms ⚠️
-   Process: PID 17344
-   Thread: TID 17366
-
-   📍 Stack trace:
-      #0  0x000000000002c6b0 trace_blocking_start
-                      at test-async-app.rs:59:0
-      #1  0x00002a2e0b79f088 <unknown>
-      #2  0x00002a2e0b822f8c <unknown>
+```
+┌─────────────────────┬──────────────────────────────────────┐
+│   MASTER STATUS     │         TOP ISSUES                   │
+│                     │                                      │
+│   ⚠️  CAUTION       │  🟡 test_async_app::blocking_task... │
+│                     │     48.5% CPU                        │
+│   Busiest: W12      │     📍 test-async-app.rs:156         │
+│   66.2% active      │                                      │
+│                     │  🟡 core::cmp::impls::<impl core::...│
+│                     │     43.1% CPU                        │
+│                     │     📍 cmp.rs:1852                   │
+├─────────────────────┼──────────────────────────────────────┤
+│  EXECUTOR THREADS   │         TIMELINE                     │
+│                     │                                      │
+│  W0   ██░░░░░░░░ 25%│  Time series visualization showing   │
+│  W1   ████░░░░░ 40% │  execution activity across workers   │
+│  W12  ████████░ 66%⚠│  over the profiling duration         │
+│                     │                                      │
+└─────────────────────┴──────────────────────────────────────┘
 ```
 
 **What you're seeing:**
-- ✅ Real-time detection of each blocking event
-- ✅ Accurate duration measurement (~450ms)
-- ✅ Process ID (PID) and Thread ID (TID)
-- ✅ **Stack traces with instruction pointers** (NEW!)
-- ✅ **Symbol resolution and source locations** (NEW!)
-- ✅ **Demangled Rust function names** (NEW!)
-- ✅ Automatic flagging of operations >10ms
+- ✅ **Master Status** - System health (CAUTION/NORMAL), busiest worker
+- ✅ **Top Issues** - Hottest functions with CPU % and source locations
+- ✅ **Worker Bars** - Load distribution across executor threads
+- ✅ **Timeline** - Execution flow visualization
+- ✅ **Smart labels** - Distinguishes user code (📍), std lib (📚), scheduler events (⚙️)
+- ✅ **HUD colors** - Red (>40%), amber (20-40%), green (<20%)
+- ✅ **File:line locations** - DWARF symbol resolution working
 
 ### Use cases
 
-1. ✅ **Testing basic tracing**: Verify eBPF uprobes attach correctly
-2. ✅ **Testing blocking detection**: Detect the 450ms blocking operations
-3. ✅ **Testing duration calculation**: Measure time between start/end events
-4. ✅ **Testing stack traces**: Capture and display instruction pointers (NEW!)
-5. ✅ **Testing symbol resolution**: DWARF debug info → source locations (NEW!)
-6. 🚧 **Testing full call stack**: Show all frames including blocking_task
-7. 🚧 **Testing cascade visualization**: (Coming in Phase 4)
-8. ✅ **Performance baseline**: eBPF overhead is negligible
+1. ✅ **Testing Glass Cockpit TUI**: Verify four-panel layout and HUD colors
+2. ✅ **Testing CPU profiling**: perf_event sampling captures hot functions
+3. ✅ **Testing symbol resolution**: DWARF debug info → function names + file:line
+4. ✅ **Testing hotspot detection**: Top Issues panel shows CPU % distribution
+5. ✅ **Testing worker visualization**: Worker Bars show load across executor threads
+6. ✅ **Testing timeline export**: Chrome trace format for temporal analysis
+7. ✅ **Testing smart labeling**: Distinguishes user code, std lib, scheduler events
+8. ✅ **Performance baseline**: eBPF overhead is negligible (<5% CPU)
 
 ### Technical Details
 
-**Marker Functions:**
-The app uses `#[no_mangle]` marker functions to make hooking easy:
+**CPU Profiling via perf_event:**
+
+runtime-scope uses **perf_event** for CPU sampling - no code instrumentation needed! The profiler:
+1. Attaches perf_event to all Tokio worker threads
+2. Samples at 99 Hz to capture what's executing
+3. Captures user-space stack traces on each sample
+4. Resolves symbols via DWARF debug info
+
+**Blocking Behavior (for demonstration):**
+
+The test app intentionally does CPU-bound work to create hot functions:
+```rust
+// This intentionally blocks the executor for ~450ms
+let start = std::time::Instant::now();
+let mut result = 0u64;
+while start.elapsed() < Duration::from_millis(450) {
+    result = result.wrapping_add((0..10000).sum::<u64>());
+}
+```
+
+This simulates CPU-bound work that doesn't yield to the executor, making it easy to spot in the profiler.
+
+**Marker Functions (legacy demonstration):**
+
+The app also includes `#[no_mangle]` marker functions for demonstration:
 ```rust
 #[no_mangle]
 #[inline(never)]
@@ -108,19 +160,7 @@ fn trace_blocking_start() { }
 fn trace_blocking_end() { }
 ```
 
-These are called before/after the blocking CPU work. In production, we'll use scheduler tracepoints instead (no code changes needed).
-
-**Blocking Behavior:**
-```rust
-// This intentionally blocks the executor for ~450ms
-let start = std::time::Instant::now();
-let mut result = 0u64;
-while start.elapsed() < Duration::from_millis(450) {
-    result = result.wrapping_add((0..10000).sum::<u64>());
-}
-```
-
-This simulates CPU-bound work that doesn't yield to the executor.
+These are called before/after the blocking work but are NOT required for profiling (perf_event captures everything).
 
 ## test-single-thread
 

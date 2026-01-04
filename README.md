@@ -1,51 +1,65 @@
 # runtime-scope
 
-✅ **Status: Phase 3 Complete - Timeline Visualization Working!** ✅
+✅ **Status: Phase 3a Complete - Glass Cockpit TUI + CPU Profiling!** ✅
 
-**Visual timeline profiler for Rust async programs using eBPF**
+**Visual profiler for Rust async programs using eBPF**
 
-Understand how your async program works by visualizing execution over time. See which workers are busy, what functions are running, and how tasks flow through your system - all with zero instrumentation required.
+Understand how your async program works with an F-35 inspired glass cockpit interface. See which workers are busy, what functions are hot, and get instant situational awareness - all with zero instrumentation required.
 
 ## What is runtime-scope?
 
-**Think: Chrome DevTools Timeline, but for Rust async runtimes**
+**Think: F-35 Glass Cockpit + Chrome DevTools Timeline for Rust async runtimes**
 
-runtime-scope uses eBPF to capture a detailed timeline of your async program's execution and exports it to Chrome's trace format for beautiful, interactive visualization.
+runtime-scope uses eBPF with dual detection modes (scheduler events + CPU sampling) to capture execution data and displays it through an intuitive terminal UI or exports to Chrome's trace format for deep-dive analysis.
 
-### Why Timeline Visualization?
+### Glass Cockpit TUI + Timeline Visualization
 
-**Flamegraphs show WHERE time is spent (spatial)**
-runtime-scope shows **WHEN** and **HOW** things happen (temporal)
+**Instant situational awareness** with F-35 inspired interface:
+- **Master Status** - CAUTION/NORMAL at a glance
+- **Top Issues** - Hottest functions with CPU % and source locations
+- **Worker Bars** - Load distribution across executor threads
+- **Timeline** - Execution flow over time
 
-| Question | Flamegraph | runtime-scope Timeline |
-|----------|-----------|----------------------|
-| "What function is slow?" | ✅ Yes | ✅ Yes |
-| "When did it get slow?" | ❌ Aggregated | ✅ See exact moment |
-| "What was happening simultaneously?" | ❌ No temporal info | ✅ See all workers |
-| "Is this intermittent?" | ❌ Just averages | ✅ See patterns |
-| "Are workers balanced?" | ❌ Overall stats | ✅ See distribution over time |
+**Plus deep-dive timeline** for temporal analysis:
 
-**Timeline = Map (structure) + Movie (behavior)**
+| Question | Flamegraph | runtime-scope |
+|----------|-----------|--------------|
+| "What function is slow?" | ✅ Yes | ✅ Yes (instant in TUI) |
+| "Where in my code?" | ❌ No source | ✅ File:line in TUI |
+| "When did it get slow?" | ❌ Aggregated | ✅ Timeline view |
+| "What was happening simultaneously?" | ❌ No temporal info | ✅ Worker bars + timeline |
+| "Is this intermittent?" | ❌ Just averages | ✅ See patterns over time |
+| "Are workers balanced?" | ❌ Overall stats | ✅ Live worker bars |
+
+**TUI = Instant insights | Timeline = Deep understanding**
 
 ## Current Status
 
 ### ✅ Phase 1 & 2 Complete
 - Real-time event collection via eBPF
 - Complete stack trace capture (55+ frames)
-- DWARF symbol resolution with source locations
+- DWARF symbol resolution with source locations (file:line)
 - Tokio worker thread identification
 - Async task tracking
 
 ### ✅ Phase 3 Complete - Timeline Visualization (Jan 2026)
-- **Enhanced event system** with execution span tracking
 - **sched_switch integration** - tracks when workers start/stop executing
 - **Execution timeline events** - TRACE_EXECUTION_START/END
-- **Rich metadata** - worker IDs, CPU info, categories
 - **Chrome trace exporter** - exports to trace.json for chrome://tracing visualization
-- **Symbol resolution** - automatic function name resolution in traces
-- **Progress indicators** - shows collection progress in real-time
-- **Automatic timeout** - exits cleanly after specified duration
-- **Tested and working** - successfully generated 10-second traces with 400+ events
+- **Symbol resolution** - automatic function name and source location in traces
+- **Tested and working** - successfully generated traces with 400+ events
+
+### ✅ Phase 3a Complete - Glass Cockpit TUI + CPU Profiling (Jan 2026)
+- **Dual detection mode** - scheduler events + perf_event CPU sampling
+- **User-space stack traces** - captures instruction pointers from CPU samples
+- **F-35 glass cockpit TUI** - four-panel interface for instant insights
+- **Master Status panel** - CAUTION/NORMAL system health indicator
+- **Top Issues panel** - hottest functions with CPU %, file:line locations
+- **Worker Bars panel** - load distribution visualization
+- **Timeline panel** - execution flow over time
+- **HUD color scheme** - green/amber/red severity indicators
+- **Smart labeling** - distinguishes user code, std lib, and scheduler events
+- **Interactive TUI** - keyboard navigation (arrow keys, q to quit)
 
 ## Quick Start
 
@@ -53,10 +67,24 @@ runtime-scope shows **WHEN** and **HOW** things happen (temporal)
 
 ```bash
 cd /home/soze/runtime-scope
-./test_trace.sh
+./test.sh
 ```
 
-This will build everything, run the test app, collect a 10-second trace, and generate `trace.json`.
+This will:
+1. Build everything (eBPF + userspace + test app)
+2. Start the test application
+3. Profile it and generate `trace.json`
+4. Press Ctrl+C to stop when done
+
+Then view the results:
+
+```bash
+# Option A: Glass Cockpit TUI (recommended for quick insights)
+./target/release/runtime-scope --tui trace.json
+
+# Option B: Chrome Timeline (for deep temporal analysis)
+google-chrome chrome://tracing  # then load trace.json
+```
 
 ### Option 2: Manual steps
 
@@ -70,48 +98,61 @@ cargo build --release --example test-async-app
 
 # Run test app
 ./target/release/examples/test-async-app &
+TEST_PID=$!
 
 # Profile it (generates trace.json)
 sudo -E ./target/release/runtime-scope \
-  --pid $(pgrep test-async-app) \
+  --pid $TEST_PID \
   --target ./target/release/examples/test-async-app \
-  --trace \
-  --duration 30 \
-  --trace-output trace.json
+  --trace
 
-# Open in Chrome
-google-chrome chrome://tracing
-# Load trace.json
+# View in TUI (instant insights)
+./target/release/runtime-scope --tui trace.json
+
+# Or view in Chrome (deep dive)
+google-chrome chrome://tracing  # then load trace.json
 ```
 
 ## CLI Reference
 
+### Profiling Mode
+
 ```
-runtime-scope [OPTIONS] --pid <PID> --target <PATH>
+runtime-scope --pid <PID> --target <PATH> [OPTIONS]
 
 Options:
   -p, --pid <PID>                    Process ID to attach to
   -t, --target <PATH>                Path to target binary
-      --trace                        Enable Chrome trace export
-      --duration <SECONDS>           Duration to profile in seconds (default: 30)
+      --trace                        Enable Chrome trace export to trace.json
+      --duration <SECONDS>           Duration to profile (default: 30)
       --trace-output <FILE>          Output path for trace JSON (default: trace.json)
-      --no-live                      Trace-only mode (suppress live event output)
+  -h, --help                         Print help
+```
+
+### TUI Mode (Visualize Existing Traces)
+
+```
+runtime-scope --tui <TRACE_FILE>
+
+Options:
+      --tui <TRACE_FILE>             Launch glass cockpit TUI for trace.json file
   -h, --help                         Print help
 ```
 
 **Examples:**
 
 ```bash
-# Live monitoring mode (default)
-sudo -E ./target/release/runtime-scope --pid 1234 --target ./my-app
-
-# Generate Chrome trace (10 seconds, quiet mode)
+# Profile and generate trace.json
 sudo -E ./target/release/runtime-scope \
-  --pid 1234 \
+  --pid $(pgrep my-app) \
   --target ./my-app \
-  --trace \
-  --duration 10 \
-  --no-live
+  --trace
+
+# View results in glass cockpit TUI (recommended)
+./target/release/runtime-scope --tui trace.json
+
+# Or view in Chrome for deep timeline analysis
+google-chrome chrome://tracing  # then load trace.json
 
 # Custom trace output location
 sudo -E ./target/release/runtime-scope \
@@ -119,22 +160,58 @@ sudo -E ./target/release/runtime-scope \
   --target ./my-app \
   --trace \
   --trace-output /tmp/my-trace.json
+
+./target/release/runtime-scope --tui /tmp/my-trace.json
 ```
 
 **What you'll see:**
-- Timeline showing active Tokio workers during the profiling period
-- Execution spans with precise start/end times
-- Worker IDs and CPU assignments in metadata
-- Zoom, pan, search with chrome://tracing's interactive UI
-- Visual understanding of worker activity patterns over time
 
-**Note:** Function names require debug symbols (see Troubleshooting below)
+**TUI Mode:**
+- **Master Status** - CAUTION/NORMAL health indicator
+- **Top Issues** - Hottest functions with CPU % and source locations (📍 file:line)
+- **Worker Bars** - Visual load distribution across executor threads
+- **Timeline** - Execution flow over time
+- **Smart labels** - Distinguishes user code, std lib (📚), scheduler events (⚙️)
+
+**Chrome Timeline:**
+- Precise execution spans with microsecond timing
+- Worker IDs and CPU assignments in metadata
+- Zoom, pan, search with interactive UI
+- Temporal understanding of worker activity patterns
+
+**Note:** Function names and source locations require debug symbols (see Troubleshooting below)
 
 ## Viewing Your Trace
 
 After running the profiler with `--trace`, you'll have a `trace.json` file ready for visualization.
 
-### Open in Chrome/Chromium
+### Option 1: Glass Cockpit TUI (Recommended)
+
+**Fast, intuitive, terminal-based** - perfect for quick insights:
+
+```bash
+./target/release/runtime-scope --tui trace.json
+```
+
+**What you'll see:**
+- **Top-left: Master Status** - ⚠️ CAUTION or ✓ NORMAL health indicator
+- **Top-right: Top Issues** - Hottest functions ranked by CPU %
+  - 🔴 Red marker = >40% CPU (CRITICAL)
+  - 🟡 Yellow marker = 20-40% CPU (CAUTION)
+  - 🟢 Green marker = <20% CPU (NORMAL)
+  - 📍 pin = source location (file:line) when available
+  - ⚙️ = scheduler event (no stack trace)
+  - 📚 = Rust std library function
+- **Bottom-left: Worker Bars** - Load visualization across executor threads
+- **Bottom-right: Timeline** - Execution flow over time
+
+**Keyboard controls:**
+- **Up/Down arrows** - Navigate (when scrolling implemented)
+- **Q** - Quit
+
+### Option 2: Chrome Timeline (Deep Dive)
+
+**For temporal analysis** when you need to understand WHEN things happen:
 
 1. **Open the trace viewer:**
    ```bash
@@ -156,33 +233,13 @@ After running the profiler with `--trace`, you'll have a `trace.json` file ready
    - **Mouse scroll** - Zoom
    - **Click** on spans to see details
 
-### What You'll See
-
-**Typical trace.json contents:**
-- **File size:** 50KB - 500KB for 10-second traces
-- **Events:** 400-2000+ execution spans depending on activity
-- **Workers:** 1-24 Tokio worker threads (only active workers shown)
-- **Timeline:** Precise start/end times in microseconds
-
-**Reading the visualization:**
+**What you'll see:**
 - Each horizontal row = one worker thread (TID)
 - Colored blocks = execution spans (time on CPU)
 - Gaps = worker was idle/off-CPU
-- Click spans to see: worker_id, cpu_id, duration, timestamps
+- Click spans to see: worker_id, cpu_id, duration, timestamps, source locations
 
-**Example trace stats:**
-```bash
-$ ls -lh trace.json
--rw-r--r-- 1 user user 75K Jan 1 23:38 trace.json
-
-$ jq '.traceEvents | length' trace.json
-423
-
-$ jq '.traceEvents | map(.ts) | [min, max]' trace.json
-[0.0, 9695.471856]  # 0ms to 9.7 seconds
-```
-
-### Alternative: Perfetto UI
+### Option 3: Perfetto UI (Advanced)
 
 Chrome Trace format is also compatible with [Perfetto](https://ui.perfetto.dev/):
 ```bash
@@ -192,6 +249,26 @@ firefox https://ui.perfetto.dev/
 ```
 
 Perfetto offers additional features like SQL queries over trace data.
+
+### Typical Trace Contents
+
+**File stats:**
+- **File size:** 50KB - 500KB for 10-30 second traces
+- **Events:** 400-2000+ execution spans depending on activity
+- **Workers:** 1-24 Tokio worker threads (only active workers shown)
+- **Timeline:** Precise start/end times in microseconds
+
+**Example:**
+```bash
+$ ls -lh trace.json
+-rw-r--r-- 1 user user 264K Jan 4 21:38 trace.json
+
+$ jq '.traceEvents | length' trace.json
+577
+
+$ jq '[.traceEvents[].name] | unique' trace.json
+["core::cmp::impls::<impl core::cmp::PartialOrd for i32>::lt", "execution", "test_async_app::blocking_task::{{closure}}", "thread_name"]
+```
 
 ## Example Visualization
 
@@ -517,16 +594,23 @@ runtime-scope/
 │   ├── src/
 │   │   ├── main.rs            # CLI, event processing
 │   │   ├── symbolizer.rs      # DWARF symbol resolution
-│   │   └── trace_exporter.rs  # Chrome trace export (WIP)
+│   │   ├── trace_exporter.rs  # Chrome trace export
+│   │   ├── tui.rs             # Glass cockpit TUI (main)
+│   │   └── tui/
+│   │       ├── status.rs      # Master Status panel
+│   │       ├── hotspot.rs     # Top Issues panel
+│   │       ├── workers.rs     # Worker Bars panel
+│   │       └── timeline.rs    # Timeline panel
 │   └── examples/
 │       └── test-async-app.rs  # Test application
 ├── runtime-scope-ebpf/         # eBPF programs (kernel)
 │   └── src/
-│       └── main.rs            # Execution tracking, sched_switch hook
+│       └── main.rs            # perf_event + sched_switch hooks
 ├── runtime-scope-common/       # Shared types
 │   └── src/
 │       └── lib.rs             # Event definitions, ExecutionSpan
 ├── xtask/                      # Build automation
+├── test.sh                     # Quick test script
 ├── VISUALIZATION_DESIGN.md     # Design documentation
 ├── REFACTORING_PLAN.md        # Implementation roadmap
 └── README.md                   # This file
@@ -535,20 +619,36 @@ runtime-scope/
 ## Roadmap
 
 ### ✅ Completed
-- [x] Phase 1: Basic eBPF infrastructure
-- [x] Phase 2: Stack traces + async task tracking
-- [x] Phase 3 (Part 1): Enhanced event types
-- [x] Phase 3 (Part 2): Execution span tracking in eBPF
-- [x] **Phase 3 (Part 3): Chrome trace exporter** ✨ (Jan 2026)
-- [x] **Phase 3 (Part 4): CLI flags for trace export** ✨ (Jan 2026)
-- [x] **Phase 3 (Part 5): End-to-end timeline visualization** ✨ (Jan 2026)
+- [x] **Phase 1**: Basic eBPF infrastructure
+- [x] **Phase 2**: Stack traces + async task tracking
+- [x] **Phase 3**: Timeline visualization with Chrome trace export (Jan 2026)
+  - [x] Enhanced event types
+  - [x] Execution span tracking in eBPF (sched_switch)
+  - [x] Chrome trace exporter with symbol resolution
+  - [x] CLI flags for trace export
+  - [x] End-to-end timeline visualization
+- [x] **Phase 3a**: Glass Cockpit TUI + CPU Profiling (Jan 2026) ✨
+  - [x] Dual detection mode (scheduler + perf_event CPU sampling)
+  - [x] User-space stack trace capture
+  - [x] F-35 inspired four-panel glass cockpit interface
+  - [x] Master Status, Top Issues, Worker Bars, Timeline panels
+  - [x] HUD color scheme (green/amber/red severity indicators)
+  - [x] Smart labeling (user code, std lib, scheduler events)
+  - [x] DWARF symbol resolution with file:line locations
 
-**Milestone:** Successfully generated 10-second trace with 423 events, visualized in chrome://tracing!
+**Latest Milestone:** Glass cockpit TUI with instant profiling insights - see hottest functions, worker load, and source locations at a glance!
 
-### 🎯 Next
-- [ ] Phase 4: Flow arrows (task spawning visualization)
-- [ ] Phase 5: Rich annotations (categories, colors)
-- [ ] Phase 6: Live terminal dashboard (optional)
+### 🎯 Next Steps
+- [ ] **Phase 4**: Enhanced TUI features
+  - [ ] Interactive function details view
+  - [ ] Flame graph integration
+  - [ ] Export recommendations
+  - [ ] Filtering and search
+- [ ] **Phase 5**: Advanced analysis
+  - [ ] Task spawn flow tracking
+  - [ ] Lock contention detection
+  - [ ] I/O vs CPU categorization
+  - [ ] Custom metric annotations
 
 ## Contributing
 
@@ -580,8 +680,8 @@ Built with:
 
 ---
 
-**Status:** ✅ Phase 3 Complete - Timeline visualization working! (Jan 1, 2026)
+**Status:** ✅ Phase 3a Complete - Glass Cockpit TUI + CPU Profiling! (Jan 4, 2026)
 
-**Latest Achievement:** Successfully generated and visualized execution timeline with 423 events over 9.7 seconds, showing Tokio worker activity patterns in chrome://tracing.
+**Latest Achievement:** F-35 inspired glass cockpit interface with instant profiling insights - see hottest functions with source locations, worker load distribution, and system health at a glance. Dual detection mode (scheduler + CPU sampling) provides comprehensive coverage.
 
-**Goal:** Make async Rust behavior visible and understandable through beautiful timeline visualization.
+**Goal:** Make async Rust behavior visible and understandable through intuitive, actionable visualizations.

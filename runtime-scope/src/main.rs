@@ -1,5 +1,6 @@
 mod symbolizer;
 mod trace_exporter;
+mod tui;
 
 use anyhow::{Context, Result};
 use aya::{
@@ -185,6 +186,9 @@ struct Args {
 
     #[arg(long, help = "Trace-only mode (no live event output)")]
     no_live: bool,
+
+    #[arg(long, value_name = "TRACE_FILE", help = "Launch TUI to visualize a trace.json file")]
+    tui: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -192,6 +196,14 @@ async fn main() -> Result<()> {
     env_logger::init();
 
     let args = Args::parse();
+
+    // If --tui flag is provided, launch TUI instead of profiler
+    if let Some(trace_path) = args.tui {
+        println!("🎨 Launching TUI for trace: {}", trace_path.display());
+        let data = tui::TraceData::from_file(&trace_path)?;
+        let app = tui::App::new(data);
+        return app.run();
+    }
 
     println!("🔍 runtime-scope v0.1.0");
     println!("   Real-time async runtime profiler\n");

@@ -45,8 +45,8 @@ pub struct ChromeTraceExporter {
     events: Vec<ChromeTraceEvent>,
     /// Symbolizer for resolving stack traces
     symbolizer: Symbolizer,
-    /// Cache for resolved symbols (stack_id -> function name)
-    symbol_cache: HashMap<i64, String>,
+    /// Cache for resolved symbols (stack_id -> (function name, file, line))
+    symbol_cache: HashMap<i64, (String, Option<String>, Option<u32>)>,
     /// Memory range for address adjustment
     memory_range: Option<MemoryRange>,
     /// Start timestamp for relative timing (in nanoseconds)
@@ -84,7 +84,8 @@ impl ChromeTraceExporter {
     }
 
     /// Resolve a symbol from a stack trace
-    fn resolve_symbol(&mut self, stack_id: i64, addr: u64) -> String {
+    /// Returns (function_name, file, line)
+    fn resolve_symbol(&mut self, stack_id: i64, addr: u64) -> (String, Option<String>, Option<u32>) {
         // Check cache first
         if let Some(cached) = self.symbol_cache.get(&stack_id) {
             return cached.clone();
@@ -104,22 +105,31 @@ impl ChromeTraceExporter {
             (addr, true)
         };
 
-        let function_name = if in_executable {
+        let (function_name, file, line) = if in_executable {
             // Resolve the symbol
             let resolved = self.symbolizer.resolve(file_offset);
 
-            // Get the outermost (non-inlined) function name
-            resolved.frames.first()
-                .map(|f| f.function.clone())
-                .unwrap_or_else(|| format!("0x{:x}", addr))
+            // Get the outermost (non-inlined) function name and location
+            if let Some(frame) = resolved.frames.first() {
+                let func = frame.function.clone();
+                let file_path = frame.location.as_ref()
+                    .and_then(|loc| loc.file.clone());
+                let line_num = frame.location.as_ref()
+                    .and_then(|loc| loc.line);
+
+                (func, file_path, line_num)
+            } else {
+                (format!("0x{:x}", addr), None, None)
+            }
         } else {
             // For shared libraries, just show address
-            format!("<shared:0x{:x}>", addr)
+            (format!("<shared:0x{:x}>", addr), None, None)
         };
 
-        // Cache the result
-        self.symbol_cache.insert(stack_id, function_name.clone());
-        function_name
+        // Cache the complete result (function name, file, line)
+        let result = (function_name, file, line);
+        self.symbol_cache.insert(stack_id, result.clone());
+        result
     }
 
     /// Add a task event to the trace
@@ -140,14 +150,14 @@ impl ChromeTraceExporter {
 
         match event.event_type {
             TRACE_EXECUTION_START => {
-                // Resolve function name from stack trace
-                let function_name = if event.stack_id < 0 {
+                // Resolve function name and source location from stack trace
+                let (function_name, file, line) = if event.stack_id < 0 {
                     // Stack capture failed (from sched_switch which can't capture user stacks)
-                    "execution".to_string()
+                    ("execution".to_string(), None, None)
                 } else if let Some(addr) = top_frame_addr {
                     self.resolve_symbol(event.stack_id, addr)
                 } else {
-                    format!("trace_{}", event.stack_id)
+                    (format!("trace_{}", event.stack_id), None, None)
                 };
 
                 // Create metadata args
@@ -160,6 +170,13 @@ impl ChromeTraceExporter {
                 // Add detection_method to distinguish between sched_switch and perf_event samples
                 if event.detection_method != 0 {
                     args.insert("detection_method".to_string(), serde_json::json!(event.detection_method));
+                }
+                // Add source location if available
+                if let Some(file_path) = file {
+                    args.insert("file".to_string(), serde_json::json!(file_path));
+                }
+                if let Some(line_num) = line {
+                    args.insert("line".to_string(), serde_json::json!(line_num));
                 }
 
                 self.events.push(ChromeTraceEvent {
