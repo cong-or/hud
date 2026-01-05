@@ -7,7 +7,9 @@ use ratatui::{
 };
 use std::collections::HashMap;
 
-use super::{TraceData, CAUTION_AMBER, CRITICAL_RED, HUD_GREEN, INFO_DIM};
+use super::{CAUTION_AMBER, CRITICAL_RED, HUD_GREEN, INFO_DIM};
+use crate::analysis::{FunctionHotspot, analyze_hotspots};
+use crate::trace_data::TraceData;
 
 /// Hotspot view showing top functions by sample count
 pub struct HotspotView {
@@ -18,48 +20,10 @@ pub struct HotspotView {
     filter_active: bool,
 }
 
-#[derive(Debug, Clone)]
-pub struct FunctionHotspot {
-    pub name: String,
-    pub count: usize,
-    pub percentage: f64,
-    pub workers: HashMap<u32, usize>, // worker_id -> count
-    pub file: Option<String>,
-    pub line: Option<u32>,
-}
-
 impl HotspotView {
     pub fn new(data: &TraceData) -> Self {
-        // Aggregate events by function name, capturing file/line from first occurrence
-        let mut function_data: HashMap<String, (HashMap<u32, usize>, Option<String>, Option<u32>)> = HashMap::new();
-
-        for event in &data.events {
-            let entry = function_data.entry(event.name.clone()).or_insert_with(|| {
-                (HashMap::new(), event.file.clone(), event.line)
-            });
-            *entry.0.entry(event.worker_id).or_insert(0) += 1;
-        }
-
-        // Convert to vector and calculate percentages
-        let total_samples = data.events.len();
-        let mut hotspots: Vec<FunctionHotspot> = function_data
-            .into_iter()
-            .map(|(name, (workers, file, line))| {
-                let count: usize = workers.values().sum();
-                let percentage = (count as f64 / total_samples as f64) * 100.0;
-                FunctionHotspot {
-                    name,
-                    count,
-                    percentage,
-                    workers,
-                    file,
-                    line,
-                }
-            })
-            .collect();
-
-        // Sort by count (descending)
-        hotspots.sort_by(|a, b| b.count.cmp(&a.count));
+        // Use analysis module to compute hotspots
+        let hotspots = analyze_hotspots(data);
 
         Self {
             scroll_offset: 0,
@@ -279,7 +243,10 @@ impl HotspotView {
             if let Some(ref file) = hotspot.file {
                 if let Some(line) = hotspot.line {
                     // Extract just filename from path
-                    let filename = file.rsplit('/').next().unwrap_or(file);
+                    let filename = std::path::Path::new(file)
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or(file);
                     lines.push(Line::from(vec![
                         Span::raw("     "),
                         Span::styled("📍 ", Style::default().fg(INFO_DIM)),

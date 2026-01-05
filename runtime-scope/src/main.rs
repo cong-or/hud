@@ -1,5 +1,3 @@
-mod tui;
-
 use anyhow::{Context, Result};
 use aya::{
     include_bytes_aligned,
@@ -25,6 +23,8 @@ use runtime_scope::symbolization::{parse_memory_maps, MemoryRange, Symbolizer};
 // Import new profiling modules
 use runtime_scope::domain::{Pid, StackId};
 use runtime_scope::profiling::{identify_tokio_workers, online_cpus, StackResolver};
+use runtime_scope::trace_data::TraceData;
+use runtime_scope::tui::App;
 
 
 /// Register Tokio worker threads in the TOKIO_WORKER_THREADS eBPF map
@@ -100,8 +100,8 @@ async fn main() -> Result<()> {
     // If --tui flag is provided, launch TUI instead of profiler
     if let Some(trace_path) = args.tui {
         println!("🎨 Launching TUI for trace: {}", trace_path.display());
-        let data = tui::TraceData::from_file(&trace_path)?;
-        let app = tui::App::new(data);
+        let data = TraceData::from_file(&trace_path)?;
+        let app = App::new(data);
         return app.run();
     }
 

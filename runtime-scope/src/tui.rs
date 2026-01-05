@@ -20,7 +20,6 @@ pub mod hotspot;  // Public for testing
 mod status;
 mod workers;
 mod theme;
-mod trace_data;
 
 use timeline::TimelineView;
 use hotspot::HotspotView;
@@ -28,7 +27,7 @@ use status::StatusPanel;
 use workers::WorkersPanel;
 use theme::*;
 
-pub use trace_data::{TraceData, TraceEvent};
+pub use crate::trace_data::{TraceData, TraceEvent};
 
 /// View mode for the TUI
 #[derive(Debug, Clone, PartialEq)]
