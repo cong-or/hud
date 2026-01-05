@@ -15,11 +15,12 @@ use runtime_scope_common::{
     EVENT_BLOCKING_END, EVENT_BLOCKING_START, EVENT_SCHEDULER_DETECTED,
     TRACE_EXECUTION_START, TRACE_EXECUTION_END,
 };
-use std::fs;
+use std::fs::{self, File};
+use std::io::BufWriter;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
+use runtime_scope::export::ChromeTraceExporter;
 use runtime_scope::symbolization::{parse_memory_maps, MemoryRange, Symbolizer};
-use runtime_scope::trace_exporter::ChromeTraceExporter;
 
 // Import new profiling modules
 use runtime_scope::domain::{Pid, StackId};
@@ -589,7 +590,10 @@ async fn main() -> Result<()> {
         println!("\n📝 Exporting Chrome trace...");
         println!("   Events collected: {}", exporter.event_count());
 
-        exporter.export(&args.trace_output)
+        let file = File::create(&args.trace_output)
+            .context("Failed to create trace output file")?;
+        let writer = BufWriter::new(file);
+        exporter.export(writer)
             .context("Failed to export trace")?;
 
         println!("   ✓ Trace exported to: {}", args.trace_output.display());
