@@ -23,18 +23,16 @@ use std::time::{Duration, Instant};
 use symbolizer::Symbolizer;
 use trace_exporter::{ChromeTraceExporter, MemoryRange as ExporterMemoryRange};
 
-/// Memory range of a loaded binary
-#[derive(Debug, Clone, Copy)]
-struct MemoryRange {
-    start: u64,
-    end: u64,
-}
+// Import new profiling modules
+use runtime_scope::domain::{Pid, StackId};
+use runtime_scope::profiling::{MemoryRange, identify_tokio_workers, online_cpus};
 
-impl MemoryRange {
-    fn contains(&self, addr: u64) -> bool {
-        addr >= self.start && addr < self.end
-    }
-}
+// Stack resolver - use full path to avoid conflict with local symbolizer mod
+use runtime_scope::profiling::StackResolver;
+
+// MemoryRange now imported from profiling module
+
+// get_memory_range, online_cpus, identify_tokio_workers now in profiling module
 
 /// Get the memory range of a binary from /proc/pid/maps
 fn get_memory_range(pid: i32, binary_path: &str) -> Result<MemoryRange> {
@@ -77,61 +75,12 @@ fn get_memory_range(pid: i32, binary_path: &str) -> Result<MemoryRange> {
     }
 }
 
-/// Get list of online CPU IDs
-fn online_cpus() -> Result<Vec<u32>> {
-    let content = fs::read_to_string("/sys/devices/system/cpu/online")
-        .context("Failed to read online CPUs")?;
-
-    let mut cpus = Vec::new();
-    for range in content.trim().split(',') {
-        if let Some((start, end)) = range.split_once('-') {
-            let start: u32 = start.parse()?;
-            let end: u32 = end.parse()?;
-            for cpu in start..=end {
-                cpus.push(cpu);
-            }
-        } else {
-            cpus.push(range.parse()?);
-        }
-    }
-    Ok(cpus)
-}
-
-/// Identify Tokio worker threads by reading /proc/pid/task/*/comm
-/// Phase 3a: Finds threads with names starting with "tokio-runtime-w"
-fn identify_tokio_workers(pid: i32) -> Result<Vec<u32>> {
-    let task_dir = format!("/proc/{}/task", pid);
-    let mut worker_tids = Vec::new();
-
-    let entries = fs::read_dir(&task_dir)
-        .context(format!("Failed to read {}", task_dir))?;
-
-    for entry in entries {
-        let entry = entry?;
-        let tid_str = entry.file_name().to_string_lossy().to_string();
-
-        if let Ok(tid) = tid_str.parse::<u32>() {
-            let comm_path = format!("/proc/{}/task/{}/comm", pid, tid);
-
-            if let Ok(comm) = fs::read_to_string(comm_path) {
-                let comm = comm.trim();
-                if comm.starts_with("tokio-runtime-w") {
-                    worker_tids.push(tid);
-                    info!("Found Tokio worker thread: TID {} ({})", tid, comm);
-                }
-            }
-        }
-    }
-
-    Ok(worker_tids)
-}
-
 /// Register Tokio worker threads in the TOKIO_WORKER_THREADS eBPF map
 /// Phase 3a: Populates the map so eBPF can filter sched_switch events
 fn register_tokio_workers(bpf: &mut Ebpf, pid: i32) -> Result<usize> {
-    let worker_tids = identify_tokio_workers(pid)?;
+    let workers = identify_tokio_workers(Pid(pid as u32))?;
 
-    if worker_tids.is_empty() {
+    if workers.is_empty() {
         warn!("No Tokio worker threads found! Make sure the target is a Tokio app.");
         return Ok(0);
     }
@@ -141,26 +90,25 @@ fn register_tokio_workers(bpf: &mut Ebpf, pid: i32) -> Result<usize> {
             .context("TOKIO_WORKER_THREADS map not found")?
     )?;
 
-    for (idx, tid) in worker_tids.iter().enumerate() {
+    for worker in &workers {
         let mut comm = [0u8; 16];
-        let comm_str = format!("tokio-runtime-w");
-        let bytes = comm_str.as_bytes();
+        let bytes = worker.comm.as_bytes();
         let copy_len = bytes.len().min(16);
         comm[..copy_len].copy_from_slice(&bytes[..copy_len]);
 
         let info = WorkerInfo {
-            worker_id: idx as u32,
+            worker_id: worker.worker_id,
             pid: pid as u32,
             comm,
             is_active: 1,
             _padding: [0u8; 3],
         };
 
-        map.insert(*tid, info, 0)?;
+        map.insert(worker.tid.0, info, 0)?;
     }
 
-    info!("✓ Registered {} Tokio worker threads", worker_tids.len());
-    Ok(worker_tids.len())
+    info!("✓ Registered {} Tokio worker threads", workers.len());
+    Ok(workers.len())
 }
 
 #[derive(Parser)]
@@ -346,18 +294,18 @@ async fn main() -> Result<()> {
 
         // Attach perf_event sampler at 99 Hz on all CPUs
         // Using AllProcessesOneCpu with PID filtering in eBPF (more reliable)
-        let online_cpus = online_cpus()?;
-        info!("Attaching perf_event sampler to {} CPUs at 99 Hz (filtering for PID {})", online_cpus.len(), pid);
-        for cpu in &online_cpus {
+        let cpus = online_cpus()?;
+        info!("Attaching perf_event sampler to {} CPUs at 99 Hz (filtering for PID {})", cpus.len(), pid);
+        for cpu in &cpus {
             program.attach(
                 perf_event::PerfTypeId::Software,
                 perf_event::perf_sw_ids::PERF_COUNT_SW_CPU_CLOCK as u64,
-                perf_event::PerfEventScope::AllProcessesOneCpu { cpu: *cpu },  // Sample all processes, filter in eBPF
+                perf_event::PerfEventScope::AllProcessesOneCpu { cpu: cpu.0 },  // Sample all processes, filter in eBPF
                 perf_event::SamplePolicy::Frequency(99),  // 99 Hz sampling
                 false,  // Don't inherit to child processes
             )?;
         }
-        info!("✓ Attached perf_event sampler to {} CPUs at 99 Hz (filtering for PID {})", online_cpus.len(), pid);
+        info!("✓ Attached perf_event sampler to {} CPUs at 99 Hz (filtering for PID {})", cpus.len(), pid);
 
         println!("✅ Scheduler-based detection active");
         println!("   Monitoring {} Tokio worker threads", worker_count);
@@ -394,6 +342,9 @@ async fn main() -> Result<()> {
     // Create symbolizer for resolving stack traces
     let symbolizer = Symbolizer::new(&target_path)
         .context("Failed to create symbolizer")?;
+
+    // Create stack resolver (deduplicates 150 lines of stack trace code!)
+    let stack_resolver = StackResolver::new(&symbolizer, memory_range);
 
     // Initialize Chrome trace exporter if requested
     let mut trace_exporter = if args.trace {
@@ -523,61 +474,9 @@ async fn main() -> Result<()> {
                             println!("   Task ID: {}", event.task_id);
                         }
 
-                        // Print stack trace from blocking start
+                        // Print stack trace from blocking start (now deduplicated!)
                         if let Some(stack_id) = blocking_start_stack_id {
-                            if stack_id >= 0 {
-                                match stack_traces.get(&(stack_id as u32), 0) {
-                                    Ok(stack_trace) => {
-                                        let frames = stack_trace.frames();
-                                        if !frames.is_empty() {
-                                            println!("\n   📍 Stack trace:");
-                                            info!("Stack trace has {} frames", frames.len());
-
-                                            for (i, stack_frame) in frames.iter().enumerate() {
-                                                let addr = stack_frame.ip;
-                                                if addr == 0 {
-                                                    info!("Frame {} has address 0, stopping", i);
-                                                    break;
-                                                }
-
-                                                // Determine if address is in main executable and adjust accordingly
-                                                let (file_offset, in_executable) = if let Some(range) = memory_range {
-                                                    if range.contains(addr) {
-                                                        // Address is in main executable, adjust to file offset
-                                                        let adjusted = addr - range.start;
-                                                        info!("Frame {}: 0x{:016x} (in executable) -> 0x{:08x}",
-                                                            i, addr, adjusted);
-                                                        (adjusted, true)
-                                                    } else {
-                                                        // Address is outside executable (shared library)
-                                                        info!("Frame {}: 0x{:016x} (shared library, skipping)", i, addr);
-                                                        (addr, false)
-                                                    }
-                                                } else {
-                                                    // No range info, use address as-is
-                                                    (addr, true)
-                                                };
-
-                                                // Only try to symbolize addresses in the main executable
-                                                if in_executable {
-                                                    let resolved = symbolizer.resolve(file_offset);
-                                                    println!("      {}", resolved.format(i));
-                                                } else {
-                                                    // Show the address but don't try to symbolize shared libraries
-                                                    println!("      #{:<2} 0x{:016x} <shared library>", i, addr);
-                                                }
-                                            }
-                                        } else {
-                                            println!("\n   ⚠️  Empty stack trace");
-                                        }
-                                    }
-                                    Err(e) => {
-                                        println!("\n   ⚠️  Failed to read stack trace: {}", e);
-                                    }
-                                }
-                            } else {
-                                println!("\n   ⚠️  No stack trace captured (stack_id = {})", stack_id);
-                            }
+                            let _ = stack_resolver.resolve_and_print(StackId(stack_id), &stack_traces);
                         }
 
                         println!();
@@ -617,70 +516,17 @@ async fn main() -> Result<()> {
                     };
                     println!("   State: {}", state_str);
 
-                    // Print stack trace
-                    if event.stack_id >= 0 {
-                        match stack_traces.get(&(event.stack_id as u32), 0) {
-                            Ok(stack_trace) => {
-                                let frames = stack_trace.frames();
-                                if !frames.is_empty() {
-                                    println!("\n   📍 Stack trace:");
-                                    info!("Stack trace has {} frames", frames.len());
-
-                                    for (i, stack_frame) in frames.iter().enumerate() {
-                                        let addr = stack_frame.ip;
-                                        if addr == 0 {
-                                            info!("Frame {} has address 0, stopping", i);
-                                            break;
-                                        }
-
-                                        let (file_offset, in_executable) = if let Some(range) = memory_range {
-                                            if range.contains(addr) {
-                                                let adjusted = addr - range.start;
-                                                info!("Frame {}: 0x{:016x} (in executable) -> 0x{:08x}",
-                                                    i, addr, adjusted);
-                                                (adjusted, true)
-                                            } else {
-                                                info!("Frame {}: 0x{:016x} (shared library, skipping)", i, addr);
-                                                (addr, false)
-                                            }
-                                        } else {
-                                            (addr, true)
-                                        };
-
-                                        if in_executable {
-                                            let resolved = symbolizer.resolve(file_offset);
-                                            println!("      {}", resolved.format(i));
-                                        } else {
-                                            println!("      #{:<2} 0x{:016x} <shared library>", i, addr);
-                                        }
-                                    }
-                                } else {
-                                    println!("\n   ⚠️  Empty stack trace");
-                                }
-                            }
-                            Err(e) => {
-                                println!("\n   ⚠️  Failed to read stack trace: {}", e);
-                            }
-                        }
-                    } else {
-                        println!("\n   ⚠️  No stack trace captured (stack_id = {})", event.stack_id);
-                    }
+                    // Print stack trace (now deduplicated!)
+                    let _ = stack_resolver.resolve_and_print(StackId(event.stack_id), &stack_traces);
 
                     println!();
                 }
                 TRACE_EXECUTION_START | TRACE_EXECUTION_END => {
-                    // Get the top frame address for symbol resolution
-                    let top_frame_addr = if event.stack_id >= 0 {
-                        match stack_traces.get(&(event.stack_id as u32), 0) {
-                            Ok(stack_trace) => {
-                                let frames = stack_trace.frames();
-                                frames.iter().find(|f| f.ip != 0).map(|f| f.ip)
-                            }
-                            Err(_) => None,
-                        }
-                    } else {
-                        None
-                    };
+                    // Get the top frame address for symbol resolution (using deduplicated method!)
+                    let top_frame_addr = StackResolver::get_top_frame_addr(
+                        StackId(event.stack_id),
+                        &stack_traces,
+                    );
 
                     // Add to trace exporter if enabled
                     if let Some(ref mut exporter) = trace_exporter {
