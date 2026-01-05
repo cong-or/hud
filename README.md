@@ -35,6 +35,12 @@ runtime-scope uses eBPF with dual detection modes (scheduler events + CPU sampli
 
 ## Current Status
 
+**Recent Updates (Jan 2026):**
+- 🎯 **Codebase refactored** - Modular architecture with focused modules (cli, profiling, analysis, export, domain)
+- 🧪 **61 tests passing** - Comprehensive test coverage
+- 📦 **Type-safe domain types** - Compile-time safety with newtype pattern
+- 🚀 **49% reduction in main.rs** - From 809 to 413 lines, improved maintainability
+
 ### ✅ Phase 1 & 2 Complete
 - Real-time event collection via eBPF
 - Complete stack trace capture (55+ frames)
@@ -401,6 +407,24 @@ Time → 0ms     100ms    200ms    300ms    400ms    500ms
 **Result:**
 Complete timeline of what each worker executed and for how long!
 
+### Key Components
+
+**Modular Architecture:**
+- `cli/` - Command-line argument parsing
+- `profiling/` - eBPF setup, stack resolution, worker discovery, CPU utilities
+- `symbolization/` - DWARF debug info parsing, symbol resolution with caching
+- `export/` - Chrome trace JSON generation
+- `analysis/` - Hotspot aggregation and ranking
+- `domain/` - Type-safe wrappers (Pid, Tid, StackId, etc.) for compile-time safety
+- `tui/` - Glass cockpit terminal interface (4 panels)
+
+**Design Principles:**
+- Zero code duplication
+- Type safety through newtype pattern
+- Focused modules (each <300 lines)
+- Comprehensive test coverage (61 tests)
+- Pragmatic, concrete implementations
+
 ## Temporal vs Spatial Understanding
 
 ### Flamegraph (Spatial) - "The Map"
@@ -592,15 +616,20 @@ sudo -E ./target/release/runtime-scope \
 runtime-scope/
 ├── runtime-scope/              # Userspace profiler
 │   ├── src/
-│   │   ├── main.rs            # CLI, event processing
-│   │   ├── symbolizer.rs      # DWARF symbol resolution
-│   │   ├── trace_exporter.rs  # Chrome trace export
-│   │   ├── tui.rs             # Glass cockpit TUI (main)
-│   │   └── tui/
-│   │       ├── status.rs      # Master Status panel
-│   │       ├── hotspot.rs     # Top Issues panel
-│   │       ├── workers.rs     # Worker Bars panel
-│   │       └── timeline.rs    # Timeline panel
+│   │   ├── main.rs            # Main entry point, event processing
+│   │   ├── cli/               # CLI argument parsing
+│   │   ├── profiling/         # eBPF setup, stack resolution, worker discovery
+│   │   ├── symbolization/     # DWARF symbol resolution, memory maps
+│   │   ├── export/            # Chrome trace export
+│   │   ├── analysis/          # Hotspot analysis, aggregation
+│   │   ├── domain/            # Type-safe domain types (Pid, Tid, StackId, etc.)
+│   │   ├── tui/               # Glass cockpit TUI
+│   │   │   ├── status.rs      # Master Status panel
+│   │   │   ├── hotspot.rs     # Top Issues panel
+│   │   │   ├── workers.rs     # Worker Bars panel
+│   │   │   └── timeline.rs    # Timeline panel
+│   │   ├── trace_data.rs      # Trace data models
+│   │   └── lib.rs             # Library exports
 │   └── examples/
 │       └── test-async-app.rs  # Test application
 ├── runtime-scope-ebpf/         # eBPF programs (kernel)
@@ -610,10 +639,7 @@ runtime-scope/
 │   └── src/
 │       └── lib.rs             # Event definitions, ExecutionSpan
 ├── xtask/                      # Build automation
-├── test.sh                     # Quick test script
-├── VISUALIZATION_DESIGN.md     # Design documentation
-├── REFACTORING_PLAN.md        # Implementation roadmap
-└── README.md                   # This file
+└── test.sh                     # Quick test script
 ```
 
 ## Roadmap
@@ -654,18 +680,23 @@ runtime-scope/
 
 We welcome contributions! Areas where help is needed:
 
-- **Chrome trace exporter** - Convert events to trace JSON
+- **TUI enhancements** - Interactive filtering, flame graphs, detail views
 - **Flow tracking** - Detect task spawn → execution relationships
 - **Category detection** - Auto-categorize functions (DB, network, etc.)
-- **Documentation** - Usage examples, tutorials
-- **Testing** - Test on real-world async applications
+- **Performance** - Optimize symbol resolution and analysis
+- **Documentation** - Usage examples, tutorials, architecture docs
+- **Testing** - Test on real-world async applications (tokio, async-std)
 
-## Resources
+## Architecture & Resources
 
-- [Design Document](VISUALIZATION_DESIGN.md) - Detailed visualization design
-- [Refactoring Plan](REFACTORING_PLAN.md) - Implementation roadmap
+**Project Documentation:**
+- [VISUALIZATION_DESIGN.md](VISUALIZATION_DESIGN.md) - TUI design and features
+- [SESSION_SUMMARY_JAN5.md](SESSION_SUMMARY_JAN5.md) - Latest refactoring and current state
+
+**External Resources:**
 - [Aya Documentation](https://aya-rs.dev/) - Rust eBPF framework
-- [Chrome Tracing](https://www.chromium.org/developers/how-tos/trace-event-profiling-tool/) - Trace format docs
+- [Chrome Tracing](https://www.chromium.org/developers/how-tos/trace-event-profiling-tool/) - Trace format specification
+- [Perfetto UI](https://ui.perfetto.dev/) - Advanced trace viewer
 
 ## License
 
