@@ -13,6 +13,8 @@ use super::TraceData;
 pub struct TimelineView {
     scroll_offset: usize,
     worker_stats: HashMap<u32, WorkerStats>,
+    zoom_level: f64,    // 1.0 = normal, >1.0 = zoomed in
+    pan_offset: f64,    // 0.0 to 1.0, position in timeline
 }
 
 #[derive(Debug, Clone)]
@@ -43,6 +45,8 @@ impl TimelineView {
         Self {
             scroll_offset: 0,
             worker_stats,
+            zoom_level: 1.0,
+            pan_offset: 0.0,
         }
     }
 
@@ -54,10 +58,45 @@ impl TimelineView {
         self.scroll_offset = self.scroll_offset.saturating_add(1);
     }
 
+    pub fn zoom_in(&mut self) {
+        self.zoom_level = (self.zoom_level * 1.5).min(10.0);
+    }
+
+    pub fn zoom_out(&mut self) {
+        self.zoom_level = (self.zoom_level / 1.5).max(1.0);
+        // Reset pan when fully zoomed out
+        if self.zoom_level == 1.0 {
+            self.pan_offset = 0.0;
+        }
+    }
+
+    pub fn pan_left(&mut self) {
+        if self.zoom_level > 1.0 {
+            self.pan_offset = (self.pan_offset - 0.1).max(0.0);
+        }
+    }
+
+    pub fn pan_right(&mut self) {
+        if self.zoom_level > 1.0 {
+            let max_pan = 1.0 - (1.0 / self.zoom_level);
+            self.pan_offset = (self.pan_offset + 0.1).min(max_pan);
+        }
+    }
+
+    pub fn get_zoom_info(&self) -> (f64, f64) {
+        (self.zoom_level, self.pan_offset)
+    }
+
     pub fn render(&self, f: &mut Frame, area: Rect, data: &TraceData) {
         let mut lines = vec![];
 
-        // Title and info
+        // Title and info with zoom level
+        let zoom_text = if self.zoom_level > 1.0 {
+            format!("  Zoom: {:.1}x  Pan: {:.0}%", self.zoom_level, self.pan_offset * 100.0)
+        } else {
+            String::new()
+        };
+
         lines.push(Line::from(vec![
             Span::styled(
                 format!("Duration: {:.1}s", data.duration),
@@ -68,6 +107,7 @@ impl TimelineView {
                 data.events.len().to_string(),
                 Style::default().fg(Color::Green),
             ),
+            Span::styled(zoom_text, Style::default().fg(Color::Yellow)),
         ]));
         lines.push(Line::from(""));
 
