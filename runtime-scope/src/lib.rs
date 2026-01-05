@@ -1,5 +1,6 @@
 // Expose modules for testing
 pub mod analysis;
+pub mod cli;
 pub mod domain;
 pub mod export;
 pub mod profiling;

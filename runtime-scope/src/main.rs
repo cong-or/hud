@@ -1,95 +1,27 @@
 use anyhow::{Context, Result};
-use aya::{
-    include_bytes_aligned,
-    maps::{HashMap, RingBuf, StackTraceMap},
-    programs::{perf_event, PerfEvent, TracePoint, UProbe},
-    Ebpf,
-};
-use aya_log::EbpfLogger;
+use aya::maps::{HashMap, RingBuf, StackTraceMap};
 use clap::Parser;
 use log::{info, warn};
 use runtime_scope_common::{
-    TaskEvent, WorkerInfo,
+    TaskEvent,
     EVENT_BLOCKING_END, EVENT_BLOCKING_START, EVENT_SCHEDULER_DETECTED,
     TRACE_EXECUTION_START, TRACE_EXECUTION_END,
 };
-use std::fs::{self, File};
+use std::fs::File;
 use std::io::BufWriter;
-use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use runtime_scope::export::ChromeTraceExporter;
-use runtime_scope::symbolization::{parse_memory_maps, MemoryRange, Symbolizer};
+use runtime_scope::symbolization::{parse_memory_maps, Symbolizer};
 
-// Import new profiling modules
-use runtime_scope::domain::{Pid, StackId};
-use runtime_scope::profiling::{identify_tokio_workers, online_cpus, StackResolver};
+// Import modules
+use runtime_scope::cli::Args;
+use runtime_scope::domain::StackId;
+use runtime_scope::profiling::{
+    attach_blocking_uprobes, init_ebpf_logger, load_ebpf_program,
+    setup_scheduler_detection, StackResolver,
+};
 use runtime_scope::trace_data::TraceData;
 use runtime_scope::tui::App;
-
-
-/// Register Tokio worker threads in the TOKIO_WORKER_THREADS eBPF map
-/// Phase 3a: Populates the map so eBPF can filter sched_switch events
-fn register_tokio_workers(bpf: &mut Ebpf, pid: i32) -> Result<usize> {
-    let workers = identify_tokio_workers(Pid(pid as u32))?;
-
-    if workers.is_empty() {
-        warn!("No Tokio worker threads found! Make sure the target is a Tokio app.");
-        return Ok(0);
-    }
-
-    let mut map: HashMap<_, u32, WorkerInfo> = HashMap::try_from(
-        bpf.map_mut("TOKIO_WORKER_THREADS")
-            .context("TOKIO_WORKER_THREADS map not found")?
-    )?;
-
-    for worker in &workers {
-        let mut comm = [0u8; 16];
-        let bytes = worker.comm.as_bytes();
-        let copy_len = bytes.len().min(16);
-        comm[..copy_len].copy_from_slice(&bytes[..copy_len]);
-
-        let info = WorkerInfo {
-            worker_id: worker.worker_id,
-            pid: pid as u32,
-            comm,
-            is_active: 1,
-            _padding: [0u8; 3],
-        };
-
-        map.insert(worker.tid.0, info, 0)?;
-    }
-
-    info!("✓ Registered {} Tokio worker threads", workers.len());
-    Ok(workers.len())
-}
-
-#[derive(Parser)]
-struct Args {
-    #[arg(short, long, help = "Process ID to attach to")]
-    pid: Option<i32>,
-
-    #[arg(
-        short,
-        long,
-        help = "Path to target binary (defaults to test-async-app)"
-    )]
-    target: Option<String>,
-
-    #[arg(long, help = "Enable Chrome trace export")]
-    trace: bool,
-
-    #[arg(long, default_value = "30", help = "Duration to profile in seconds (when using --trace)")]
-    duration: u64,
-
-    #[arg(long, default_value = "trace.json", help = "Output path for trace JSON")]
-    trace_output: PathBuf,
-
-    #[arg(long, help = "Trace-only mode (no live event output)")]
-    no_live: bool,
-
-    #[arg(long, value_name = "TRACE_FILE", help = "Launch TUI to visualize a trace.json file")]
-    tui: Option<PathBuf>,
-}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -122,91 +54,13 @@ async fn main() -> Result<()> {
     println!("📦 Target: {}", target_path);
 
     // Load the eBPF program
-    #[cfg(debug_assertions)]
-    let mut bpf = Ebpf::load(include_bytes_aligned!(
-        "../../target/bpfel-unknown-none/debug/runtime-scope"
-    ))?;
-    #[cfg(not(debug_assertions))]
-    let mut bpf = Ebpf::load(include_bytes_aligned!(
-        "../../target/bpfel-unknown-none/release/runtime-scope"
-    ))?;
+    let mut bpf = load_ebpf_program()?;
 
     // Initialize logging from eBPF
-    if let Err(e) = EbpfLogger::init(&mut bpf) {
-        warn!("Failed to initialize eBPF logger: {}", e);
-    }
+    init_ebpf_logger(&mut bpf);
 
-    // Attach uprobe to trace_blocking_start
-    let program: &mut UProbe = bpf
-        .program_mut("trace_blocking_start_hook")
-        .context("program not found")?
-        .try_into()?;
-    program.load()?;
-    program.attach(
-        Some("trace_blocking_start"),
-        0,
-        &target_path,
-        args.pid,
-    )?;
-
-    info!("✓ Attached uprobe: trace_blocking_start");
-
-    // Attach uprobe to trace_blocking_end
-    let program: &mut UProbe = bpf
-        .program_mut("trace_blocking_end_hook")
-        .context("program not found")?
-        .try_into()?;
-    program.load()?;
-    program.attach(
-        Some("trace_blocking_end"),
-        0,
-        &target_path,
-        args.pid,
-    )?;
-
-    info!("✓ Attached uprobe: trace_blocking_end");
-
-    // Attach uprobe to tokio::runtime::context::set_current_task_id
-    // Note: This symbol may not exist in release builds (gets inlined)
-    // Task ID tracking will be unavailable if the symbol is not found
-    let task_id_attached = match bpf.program_mut("set_task_id_hook") {
-        Some(program) => {
-            match program.try_into() {
-                Ok(program) => {
-                    let program: &mut UProbe = program;
-                    if let Err(e) = program.load() {
-                        warn!("⚠️  Failed to load set_task_id_hook: {}", e);
-                        false
-                    } else {
-                        match program.attach(
-                            Some("_ZN5tokio7runtime7context19set_current_task_id17h88510a52941c215fE"),
-                            0,
-                            &target_path,
-                            args.pid,
-                        ) {
-                            Ok(_) => {
-                                info!("✓ Attached uprobe: set_current_task_id");
-                                true
-                            }
-                            Err(e) => {
-                                warn!("⚠️  Could not attach set_task_id_hook: {}", e);
-                                warn!("   Task ID tracking unavailable (symbol likely inlined in release build)");
-                                false
-                            }
-                        }
-                    }
-                }
-                Err(e) => {
-                    warn!("⚠️  Failed to convert set_task_id_hook: {}", e);
-                    false
-                }
-            }
-        }
-        None => {
-            warn!("⚠️  set_task_id_hook program not found");
-            false
-        }
-    };
+    // Attach blocking marker uprobes
+    let task_id_attached = attach_blocking_uprobes(&mut bpf, &target_path, args.pid)?;
 
     if !task_id_attached {
         println!("⚠️  Note: Task IDs will not be available (set_current_task_id inlined in release build)");
@@ -214,54 +68,7 @@ async fn main() -> Result<()> {
 
     // Phase 3a: Setup scheduler-based detection
     if let Some(pid) = args.pid {
-        println!("\n🔧 Phase 3a: Setting up scheduler-based detection...");
-
-        // 1. Set configuration (5ms threshold and target PID)
-        let mut config_map: HashMap<_, u32, u64> = HashMap::try_from(
-            bpf.map_mut("CONFIG").context("CONFIG map not found")?
-        )?;
-        config_map.insert(0, 5_000_000, 0)?;  // 5ms threshold in nanoseconds
-        config_map.insert(1, pid as u64, 0)?;  // target PID for perf_event filtering
-        info!("✓ Set blocking threshold: 5ms");
-        info!("✓ Set target PID: {}", pid);
-
-        // 2. Identify and register Tokio worker threads
-        let worker_count = register_tokio_workers(&mut bpf, pid)?;
-
-        // 3. Attach sched_switch tracepoint
-        let program: &mut TracePoint = bpf
-            .program_mut("sched_switch_hook")
-            .context("sched_switch_hook program not found")?
-            .try_into()?;
-        program.load()?;
-        program.attach("sched", "sched_switch")?;
-        info!("✓ Attached tracepoint: sched/sched_switch");
-
-        // 4. Attach CPU sampling perf_event for stack traces
-        let program: &mut PerfEvent = bpf
-            .program_mut("on_cpu_sample")
-            .context("on_cpu_sample program not found")?
-            .try_into()?;
-        program.load()?;
-
-        // Attach perf_event sampler at 99 Hz on all CPUs
-        // Using AllProcessesOneCpu with PID filtering in eBPF (more reliable)
-        let cpus = online_cpus()?;
-        info!("Attaching perf_event sampler to {} CPUs at 99 Hz (filtering for PID {})", cpus.len(), pid);
-        for cpu in &cpus {
-            program.attach(
-                perf_event::PerfTypeId::Software,
-                perf_event::perf_sw_ids::PERF_COUNT_SW_CPU_CLOCK as u64,
-                perf_event::PerfEventScope::AllProcessesOneCpu { cpu: cpu.0 },  // Sample all processes, filter in eBPF
-                perf_event::SamplePolicy::Frequency(99),  // 99 Hz sampling
-                false,  // Don't inherit to child processes
-            )?;
-        }
-        info!("✓ Attached perf_event sampler to {} CPUs at 99 Hz (filtering for PID {})", cpus.len(), pid);
-
-        println!("✅ Scheduler-based detection active");
-        println!("   Monitoring {} Tokio worker threads", worker_count);
-        println!("   CPU sampling: 99 Hz (every ~10ms)\n");
+        let worker_count = setup_scheduler_detection(&mut bpf, pid)?;
 
         println!("📊 Monitoring PID: {}", pid);
         println!("   Marker detection: trace_blocking_start, trace_blocking_end");
@@ -358,7 +165,6 @@ async fn main() -> Result<()> {
 
     // Track progress updates
     let mut last_progress_time = Instant::now();
-    let mut timeout_reached = false;
 
     // Read events from the ring buffer
     loop {
