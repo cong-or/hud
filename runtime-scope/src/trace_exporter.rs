@@ -7,7 +7,7 @@ use std::fs::File;
 use std::io::BufWriter;
 use std::path::Path;
 
-use crate::symbolizer::Symbolizer;
+use crate::symbolization::{MemoryRange, Symbolizer};
 
 /// Chrome Trace Event format
 /// Spec: https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview
@@ -51,19 +51,6 @@ pub struct ChromeTraceExporter {
     memory_range: Option<MemoryRange>,
     /// Start timestamp for relative timing (in nanoseconds)
     start_timestamp_ns: Option<u64>,
-}
-
-/// Memory range of a loaded binary
-#[derive(Debug, Clone, Copy)]
-pub struct MemoryRange {
-    pub start: u64,
-    pub end: u64,
-}
-
-impl MemoryRange {
-    pub fn contains(&self, addr: u64) -> bool {
-        addr >= self.start && addr < self.end
-    }
 }
 
 impl ChromeTraceExporter {

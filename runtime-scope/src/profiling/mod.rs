@@ -11,6 +11,9 @@ pub mod worker_discovery;
 pub mod cpu_utils;
 
 // Re-export common types
-pub use stack_resolver::{MemoryRange, StackResolver};
+pub use stack_resolver::StackResolver;
 pub use worker_discovery::{WorkerInfo, identify_tokio_workers};
 pub use cpu_utils::online_cpus;
+
+// Re-export MemoryRange from symbolization for convenience
+pub use crate::symbolization::MemoryRange;

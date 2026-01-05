@@ -1,4 +1,4 @@
-use runtime_scope::symbolizer::Symbolizer;
+use runtime_scope::symbolization::Symbolizer;
 
 #[test]
 fn test_symbolizer_creation() {

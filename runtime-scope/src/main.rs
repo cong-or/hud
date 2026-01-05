@@ -18,58 +18,13 @@ use runtime_scope_common::{
 use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use runtime_scope::symbolizer::Symbolizer;
-use runtime_scope::trace_exporter::{ChromeTraceExporter, MemoryRange as ExporterMemoryRange};
+use runtime_scope::symbolization::{parse_memory_maps, MemoryRange, Symbolizer};
+use runtime_scope::trace_exporter::ChromeTraceExporter;
 
 // Import new profiling modules
 use runtime_scope::domain::{Pid, StackId};
-use runtime_scope::profiling::{MemoryRange, identify_tokio_workers, online_cpus};
-use runtime_scope::profiling::StackResolver;
+use runtime_scope::profiling::{identify_tokio_workers, online_cpus, StackResolver};
 
-// MemoryRange now imported from profiling module
-
-// get_memory_range, online_cpus, identify_tokio_workers now in profiling module
-
-/// Get the memory range of a binary from /proc/pid/maps
-fn get_memory_range(pid: i32, binary_path: &str) -> Result<MemoryRange> {
-    let maps_path = format!("/proc/{}/maps", pid);
-    let maps = fs::read_to_string(&maps_path)
-        .context(format!("Failed to read {}", maps_path))?;
-
-    let mut start_addr = None;
-    let mut end_addr = None;
-
-    // Find ALL mappings of the target binary to get the full range
-    for line in maps.lines() {
-        if line.contains(binary_path) {
-            // Parse the line: "start-end perms offset dev inode pathname"
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 3 {
-                let range = parts[0];
-                let range_parts: Vec<&str> = range.split('-').collect();
-                if range_parts.len() == 2 {
-                    let start = u64::from_str_radix(range_parts[0], 16)
-                        .context("Failed to parse range start")?;
-                    let end = u64::from_str_radix(range_parts[1], 16)
-                        .context("Failed to parse range end")?;
-
-                    // Track the minimum start and maximum end
-                    start_addr = Some(start_addr.map_or(start, |s: u64| s.min(start)));
-                    end_addr = Some(end_addr.map_or(end, |e: u64| e.max(end)));
-                }
-            }
-        }
-    }
-
-    match (start_addr, end_addr) {
-        (Some(start), Some(end)) => {
-            info!("Executable memory range: 0x{:x} - 0x{:x} (size: {} KB)",
-                start, end, (end - start) / 1024);
-            Ok(MemoryRange { start, end })
-        }
-        _ => Err(anyhow::anyhow!("Could not find memory range for {}", binary_path))
-    }
-}
 
 /// Register Tokio worker threads in the TOKIO_WORKER_THREADS eBPF map
 /// Phase 3a: Populates the map so eBPF can filter sched_switch events
@@ -321,7 +276,7 @@ async fn main() -> Result<()> {
 
     // Get memory range for PIE address resolution
     let memory_range = if let Some(pid) = args.pid {
-        match get_memory_range(pid, &target_path) {
+        match parse_memory_maps(pid, &target_path) {
             Ok(range) => {
                 info!("Found memory range: 0x{:x} - 0x{:x}", range.start, range.end);
                 Some(range)
@@ -346,10 +301,7 @@ async fn main() -> Result<()> {
     let mut trace_exporter = if args.trace {
         let mut exporter = ChromeTraceExporter::new(Symbolizer::new(&target_path)?);
         if let Some(range) = memory_range {
-            exporter.set_memory_range(ExporterMemoryRange {
-                start: range.start,
-                end: range.end,
-            });
+            exporter.set_memory_range(range);
         }
         println!("\n📊 Chrome trace export enabled");
         println!("   Duration: {}s", args.duration);

@@ -9,20 +9,7 @@ use log::info;
 use std::borrow::Borrow;
 
 use crate::domain::StackId;
-use crate::symbolizer::Symbolizer;
-
-/// Memory range for PIE executable address adjustment
-#[derive(Debug, Clone, Copy)]
-pub struct MemoryRange {
-    pub start: u64,
-    pub end: u64,
-}
-
-impl MemoryRange {
-    pub fn contains(&self, addr: u64) -> bool {
-        addr >= self.start && addr < self.end
-    }
-}
+use crate::symbolization::{MemoryRange, Symbolizer};
 
 /// Stack trace resolver - handles resolving and displaying stack traces
 ///

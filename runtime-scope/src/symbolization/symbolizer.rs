@@ -3,14 +3,21 @@ use anyhow::{Context as _, Result};
 use gimli::{EndianRcSlice, RunTimeEndian};
 use object::{Object, ObjectSection};
 use rustc_demangle::demangle;
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::rc::Rc;
 
 /// Symbolizer for resolving instruction pointers to source locations
+///
+/// Includes a cache to avoid re-resolving the same addresses repeatedly,
+/// which significantly improves performance when symbolizing stack traces.
 pub struct Symbolizer {
     ctx: Context<EndianRcSlice<RunTimeEndian>>,
     base_addr: u64,
+    /// Cache of resolved frames by address
+    cache: RefCell<HashMap<u64, ResolvedFrame>>,
 }
 
 impl Symbolizer {
@@ -54,13 +61,23 @@ impl Symbolizer {
         let ctx = Context::from_dwarf(dwarf)
             .context("Failed to load DWARF debug information")?;
 
-        Ok(Self { ctx, base_addr })
+        Ok(Self {
+            ctx,
+            base_addr,
+            cache: RefCell::new(HashMap::new()),
+        })
     }
 
     /// Resolve an instruction pointer to source location information
+    ///
+    /// Uses a cache to avoid re-resolving the same address multiple times.
     pub fn resolve(&self, addr: u64) -> ResolvedFrame {
-        // For PIE executables, the address might need adjustment
-        // For now, use it directly
+        // Check cache first
+        if let Some(cached) = self.cache.borrow().get(&addr) {
+            return cached.clone();
+        }
+
+        // Cache miss - perform actual resolution
         let mut result = Vec::new();
 
         if let Ok(mut frame_iter) = self.ctx.find_frames(addr).skip_all_loads() {
@@ -83,7 +100,7 @@ impl Symbolizer {
             }
         }
 
-        ResolvedFrame {
+        let resolved = ResolvedFrame {
             addr,
             frames: if result.is_empty() {
                 vec![InlinedFrame {
@@ -93,7 +110,12 @@ impl Symbolizer {
             } else {
                 result
             },
-        }
+        };
+
+        // Store in cache
+        self.cache.borrow_mut().insert(addr, resolved.clone());
+
+        resolved
     }
 
     /// Demangle a Rust symbol name
@@ -103,21 +125,21 @@ impl Symbolizer {
 }
 
 /// A resolved stack frame (may contain multiple inlined frames)
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ResolvedFrame {
     pub addr: u64,
     pub frames: Vec<InlinedFrame>,
 }
 
 /// An inlined frame within a resolved frame
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct InlinedFrame {
     pub function: String,
     pub location: Option<SourceLocation>,
 }
 
 /// Source code location
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SourceLocation {
     pub file: Option<String>,
     pub line: Option<u32>,
