@@ -1,5 +1,3 @@
-mod symbolizer;
-mod trace_exporter;
 mod tui;
 
 use anyhow::{Context, Result};
@@ -20,14 +18,12 @@ use runtime_scope_common::{
 use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use symbolizer::Symbolizer;
-use trace_exporter::{ChromeTraceExporter, MemoryRange as ExporterMemoryRange};
+use runtime_scope::symbolizer::Symbolizer;
+use runtime_scope::trace_exporter::{ChromeTraceExporter, MemoryRange as ExporterMemoryRange};
 
 // Import new profiling modules
 use runtime_scope::domain::{Pid, StackId};
 use runtime_scope::profiling::{MemoryRange, identify_tokio_workers, online_cpus};
-
-// Stack resolver - use full path to avoid conflict with local symbolizer mod
 use runtime_scope::profiling::StackResolver;
 
 // MemoryRange now imported from profiling module

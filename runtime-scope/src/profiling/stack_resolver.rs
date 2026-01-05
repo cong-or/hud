@@ -9,29 +9,7 @@ use log::info;
 use std::borrow::Borrow;
 
 use crate::domain::StackId;
-
-// Trait for symbolizers - allows any symbolizer implementation
-pub trait SymbolizerTrait {
-    fn resolve(&self, addr: u64) -> ResolvedSymbol;
-}
-
-// Resolved symbol information
-pub struct ResolvedSymbol {
-    pub function: String,
-    pub file: Option<String>,
-    pub line: Option<u32>,
-}
-
-impl ResolvedSymbol {
-    pub fn format(&self, index: usize) -> String {
-        match (&self.file, self.line) {
-            (Some(file), Some(line)) => {
-                format!("#{:<2} {} at {}:{}", index, self.function, file, line)
-            }
-            _ => format!("#{:<2} {}", index, self.function),
-        }
-    }
-}
+use crate::symbolizer::Symbolizer;
 
 /// Memory range for PIE executable address adjustment
 #[derive(Debug, Clone, Copy)]
@@ -53,19 +31,14 @@ impl MemoryRange {
 /// - Adjusting addresses for PIE executables
 /// - Resolving addresses to symbols
 /// - Formatting and printing stack traces
-///
-/// Generic over the symbolizer type to work with both lib and main symbolizer modules
-pub struct StackResolver<'a, S> {
-    symbolizer: &'a S,
+pub struct StackResolver<'a> {
+    symbolizer: &'a Symbolizer,
     memory_range: Option<MemoryRange>,
 }
 
-impl<'a, S> StackResolver<'a, S>
-where
-    S: SymbolizerTrait,
-{
+impl<'a> StackResolver<'a> {
     /// Create a new stack resolver
-    pub fn new(symbolizer: &'a S, memory_range: Option<MemoryRange>) -> Self {
+    pub fn new(symbolizer: &'a Symbolizer, memory_range: Option<MemoryRange>) -> Self {
         Self {
             symbolizer,
             memory_range,
@@ -121,8 +94,8 @@ where
 
             // Symbolize and print
             if in_executable {
-                let resolved = self.symbolizer.resolve(file_offset);
-                println!("      {}", resolved.format(i));
+                let resolved_frame = self.symbolizer.resolve(file_offset);
+                println!("      {}", resolved_frame.format(i));
             } else {
                 // Shared library - show address but don't symbolize
                 println!("      #{:<2} 0x{:016x} <shared library>", i, addr);
