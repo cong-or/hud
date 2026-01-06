@@ -5,17 +5,26 @@
 //! - Worker thread discovery
 //! - CPU utilities
 //! - eBPF program loading and setup
+//! - Debug diagnostics
+//! - Event display formatting
 
 pub mod stack_resolver;
 pub mod worker_discovery;
 pub mod cpu_utils;
 pub mod ebpf_setup;
+pub mod diagnostics;
+pub mod event_display;
 
 // Re-export common types
 pub use stack_resolver::StackResolver;
 pub use worker_discovery::{WorkerInfo, identify_tokio_workers};
 pub use cpu_utils::online_cpus;
 pub use ebpf_setup::{load_ebpf_program, init_ebpf_logger, attach_blocking_uprobes, setup_scheduler_detection};
+pub use diagnostics::print_perf_event_diagnostics;
+pub use event_display::{
+    DetectionStats, display_blocking_start, display_blocking_end, display_blocking_end_no_start,
+    display_scheduler_detected, display_execution_event, display_statistics, display_progress,
+};
 
 // Re-export MemoryRange from symbolization for convenience
 pub use crate::symbolization::MemoryRange;

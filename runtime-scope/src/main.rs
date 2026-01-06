@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use aya::maps::{HashMap, RingBuf, StackTraceMap};
+use aya::maps::{RingBuf, StackTraceMap};
 use clap::Parser;
 use log::{info, warn};
 use runtime_scope_common::{
@@ -18,7 +18,9 @@ use runtime_scope::cli::Args;
 use runtime_scope::domain::StackId;
 use runtime_scope::profiling::{
     attach_blocking_uprobes, init_ebpf_logger, load_ebpf_program,
-    setup_scheduler_detection, StackResolver,
+    print_perf_event_diagnostics, setup_scheduler_detection, StackResolver,
+    DetectionStats, display_blocking_start, display_blocking_end, display_blocking_end_no_start,
+    display_scheduler_detected, display_execution_event, display_statistics, display_progress,
 };
 use runtime_scope::trace_data::TraceData;
 use runtime_scope::tui::App;
@@ -136,11 +138,6 @@ async fn main() -> Result<()> {
     let mut last_status_time = Instant::now();
 
     // Phase 3a: Statistics tracking
-    #[derive(Default)]
-    struct DetectionStats {
-        marker_detected: u64,
-        scheduler_detected: u64,
-    }
     let mut stats = DetectionStats::default();
     let mut stats_timer = Instant::now();
 
@@ -205,76 +202,31 @@ async fn main() -> Result<()> {
                     blocking_start_time = Some(event.timestamp_ns);
                     blocking_start_stack_id = Some(event.stack_id);
 
-                    println!(
-                        "🔴 [PID {} TID {}] Blocking started",
-                        event.pid,
-                        event.tid
-                    );
+                    display_blocking_start(&event);
                 }
                 EVENT_BLOCKING_END => {
                     if let Some(start_time) = blocking_start_time {
-                        let duration_ns = event.timestamp_ns - start_time;
-                        let duration_ms = duration_ns as f64 / 1_000_000.0;
-
                         stats.marker_detected += 1;  // Phase 3a: Track marker stats
 
-                        println!("\n🔵 MARKER DETECTED");
-                        println!("   Duration: {:.2}ms {}",
-                            duration_ms,
-                            if duration_ms > 10.0 { "⚠️" } else { "" }
+                        display_blocking_end(
+                            &event,
+                            start_time,
+                            blocking_start_stack_id,
+                            &stack_resolver,
+                            &stack_traces,
                         );
-                        println!("   Process: PID {}", event.pid);
-                        println!("   Thread: TID {}", event.tid);
-                        if event.task_id != 0 {
-                            println!("   Task ID: {}", event.task_id);
-                        }
-
-                        // Print stack trace from blocking start (now deduplicated!)
-                        if let Some(stack_id) = blocking_start_stack_id {
-                            let _ = stack_resolver.resolve_and_print(StackId(stack_id), &stack_traces);
-                        }
-
-                        println!();
 
                         blocking_start_time = None;
                         blocking_start_stack_id = None;
                     } else {
-                        println!(
-                            "  ✓ [PID {} TID {}] Blocking ended (no start time)",
-                            event.pid, event.tid
-                        );
+                        display_blocking_end_no_start(&event);
                     }
                 }
                 EVENT_SCHEDULER_DETECTED => {
                     // Phase 3a: Scheduler-based detection
                     stats.scheduler_detected += 1;
 
-                    let duration_ms = event.duration_ns as f64 / 1_000_000.0;
-
-                    println!("\n🟢 SCHEDULER DETECTED");
-                    println!("   Duration: {:.2}ms (off-CPU) {}",
-                        duration_ms,
-                        if duration_ms > 10.0 { "⚠️" } else { "" }
-                    );
-                    println!("   Process: PID {}", event.pid);
-                    println!("   Thread: TID {}", event.tid);
-                    if event.task_id != 0 {
-                        println!("   Task ID: {}", event.task_id);
-                    }
-
-                    // Decode thread state
-                    let state_str = match event.thread_state {
-                        0 => "TASK_RUNNING (CPU blocking)",
-                        1 => "TASK_INTERRUPTIBLE (I/O wait)",
-                        2 => "TASK_UNINTERRUPTIBLE",
-                        _ => "UNKNOWN",
-                    };
-                    println!("   State: {}", state_str);
-
-                    // Print stack trace (now deduplicated!)
-                    let _ = stack_resolver.resolve_and_print(StackId(event.stack_id), &stack_traces);
-
-                    println!();
+                    display_scheduler_detected(&event, &stack_resolver, &stack_traces);
                 }
                 TRACE_EXECUTION_START | TRACE_EXECUTION_END => {
                     // Get the top frame address for symbol resolution (using deduplicated method!)
@@ -290,23 +242,8 @@ async fn main() -> Result<()> {
 
                     // Optionally display live (unless --no-live)
                     if live_display {
-                        let event_name = if event.event_type == TRACE_EXECUTION_START {
-                            "EXEC_START"
-                        } else {
-                            "EXEC_END"
-                        };
-
-                        println!(
-                            "🟣 {} [PID {} TID {} Worker {}]",
-                            event_name,
-                            event.pid,
-                            event.tid,
-                            if event.worker_id != u32::MAX {
-                                event.worker_id.to_string()
-                            } else {
-                                "N/A".to_string()
-                            }
-                        );
+                        let is_start = event.event_type == TRACE_EXECUTION_START;
+                        display_execution_event(&event, is_start);
                     }
                 }
                 _ => {
@@ -317,10 +254,7 @@ async fn main() -> Result<()> {
 
         // Phase 3a: Print statistics every 10 seconds
         if stats_timer.elapsed() > Duration::from_secs(10) {
-            println!("\n📊 Detection Statistics (last 10s):");
-            println!("   Marker:    {}", stats.marker_detected);
-            println!("   Scheduler: {}", stats.scheduler_detected);
-            println!();
+            display_statistics(&stats);
             stats_timer = Instant::now();
         }
 
@@ -331,10 +265,7 @@ async fn main() -> Result<()> {
                 let remaining = limit.saturating_sub(elapsed);
                 let elapsed_secs = elapsed.as_secs();
                 let remaining_secs = remaining.as_secs();
-                print!("\r   Progress: {}s / {}s ({}s remaining)   ",
-                    elapsed_secs, args.duration, remaining_secs);
-                use std::io::Write;
-                std::io::stdout().flush().ok();
+                display_progress(elapsed_secs, args.duration, remaining_secs);
                 last_progress_time = Instant::now();
             }
         }
@@ -354,41 +285,7 @@ async fn main() -> Result<()> {
 
     // DEBUG: Check perf_event counters to track event flow
     if args.pid.is_some() {
-        println!("\n🔍 DEBUG: perf_event diagnostics:");
-
-        // Total calls
-        let counter_map: HashMap<_, u32, u64> = HashMap::try_from(
-            bpf.map("PERF_EVENT_COUNTER").context("PERF_EVENT_COUNTER map not found")?
-        )?;
-        if let Ok(count) = counter_map.get(&0u32, 0) {
-            println!("   - Handler called: {} times", count);
-        }
-
-        // Passed PID filter
-        let pid_filter_map: HashMap<_, u32, u64> = HashMap::try_from(
-            bpf.map("PERF_EVENT_PASSED_PID_FILTER").context("PERF_EVENT_PASSED_PID_FILTER map not found")?
-        )?;
-        if let Ok(count) = pid_filter_map.get(&0u32, 0) {
-            println!("   - Passed PID filter: {} times", count);
-        } else {
-            println!("   - Passed PID filter: 0 times (ALL FILTERED OUT!)");
-        }
-
-        // Output success
-        let success_map: HashMap<_, u32, u64> = HashMap::try_from(
-            bpf.map("PERF_EVENT_OUTPUT_SUCCESS").context("PERF_EVENT_OUTPUT_SUCCESS map not found")?
-        )?;
-        if let Ok(count) = success_map.get(&0u32, 0) {
-            println!("   - Events output success: {}", count);
-        }
-
-        // Output failed
-        let failed_map: HashMap<_, u32, u64> = HashMap::try_from(
-            bpf.map("PERF_EVENT_OUTPUT_FAILED").context("PERF_EVENT_OUTPUT_FAILED map not found")?
-        )?;
-        if let Ok(count) = failed_map.get(&0u32, 0) {
-            println!("   - Events output failed: {}", count);
-        }
+        print_perf_event_diagnostics(&mut bpf)?;
     }
 
     // Export trace if enabled
