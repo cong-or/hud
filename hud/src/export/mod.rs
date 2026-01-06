@@ -1,8 +1,8 @@
 //! Trace export functionality
 //!
 //! This module provides functionality for exporting profiling data to various formats.
-//! Currently supports Chrome Trace Event Format for visualization in <chrome://tracing>.
+//! Currently supports Trace Event Format for visualization in tools like Perfetto, Speedscope, and others.
 
-pub mod chrome_trace;
+pub mod trace_event;
 
-pub use chrome_trace::ChromeTraceExporter;
+pub use trace_event::TraceEventExporter;

@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use aya::maps::{RingBuf, StackTraceMap};
 use clap::Parser;
 use crossbeam_channel::bounded;
-use hud::export::ChromeTraceExporter;
+use hud::export::TraceEventExporter;
 use hud::symbolization::{parse_memory_maps, Symbolizer};
 use hud_common::{
     TaskEvent, EVENT_BLOCKING_END, EVENT_BLOCKING_START, EVENT_SCHEDULER_DETECTED,
@@ -103,9 +103,9 @@ async fn main() -> Result<()> {
     // Create stack resolver
     let stack_resolver = StackResolver::new(&symbolizer, memory_range);
 
-    // Initialize Chrome trace exporter if export requested
+    // Initialize trace event exporter if export requested
     let mut trace_exporter = args.export.as_ref().map(|_| {
-        let mut exporter = ChromeTraceExporter::new(Symbolizer::new(&target_path).unwrap());
+        let mut exporter = TraceEventExporter::new(Symbolizer::new(&target_path).unwrap());
         if let Some(range) = memory_range {
             exporter.set_memory_range(range);
         }

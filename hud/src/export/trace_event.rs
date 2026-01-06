@@ -1,4 +1,4 @@
-// Time conversions intentionally lose precision for Chrome trace format
+// Time conversions intentionally lose precision for trace event format
 #![allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
 
 use anyhow::{Context, Result};
@@ -10,7 +10,7 @@ use std::io::Write;
 
 use crate::symbolization::{MemoryRange, Symbolizer};
 
-/// Chrome Trace Event format
+/// Trace Event format (compatible with Perfetto, Speedscope, Chrome tracing)
 /// Spec: <https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview>
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ChromeTraceEvent {
@@ -40,8 +40,8 @@ struct ChromeTrace {
     display_time_unit: String,
 }
 
-/// Chrome trace exporter for timeline visualization
-pub struct ChromeTraceExporter {
+/// Trace event exporter for timeline visualization
+pub struct TraceEventExporter {
     /// Collected trace events
     events: Vec<ChromeTraceEvent>,
     /// Symbolizer for resolving stack traces
@@ -54,8 +54,8 @@ pub struct ChromeTraceExporter {
     start_timestamp_ns: Option<u64>,
 }
 
-impl ChromeTraceExporter {
-    /// Create a new Chrome trace exporter
+impl TraceEventExporter {
+    /// Create a new trace event exporter
     pub fn new(symbolizer: Symbolizer) -> Self {
         Self {
             events: Vec::new(),
@@ -225,7 +225,7 @@ impl ChromeTraceExporter {
     ///
     /// # Example
     /// ```
-    /// use hud::export::ChromeTraceExporter;
+    /// use hud::export::TraceEventExporter;
     /// use hud::symbolization::Symbolizer;
     /// use std::fs::File;
     /// use std::io::BufWriter;
@@ -233,7 +233,7 @@ impl ChromeTraceExporter {
     /// # fn example() -> anyhow::Result<()> {
     /// let binary_path = "/bin/ls";
     /// let symbolizer = Symbolizer::new(binary_path)?;
-    /// let exporter = ChromeTraceExporter::new(symbolizer);
+    /// let exporter = TraceEventExporter::new(symbolizer);
     ///
     /// // Write to file
     /// let file = File::create("trace.json")?;

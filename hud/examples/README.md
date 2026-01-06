@@ -35,8 +35,8 @@ Then view the results:
 # Glass Cockpit TUI (recommended for instant insights)
 ./target/release/hud --tui trace.json
 
-# Or Chrome Timeline (for deep temporal analysis)
-google-chrome chrome://tracing  # then load trace.json
+# Or use a trace viewer (for deep temporal analysis)
+# Visit https://ui.perfetto.dev or https://speedscope.app and load trace.json
 ```
 
 **Manual mode:**
@@ -119,7 +119,7 @@ sudo -E ./target/release/hud \
 3. ✅ **Testing symbol resolution**: DWARF debug info → function names + file:line
 4. ✅ **Testing hotspot detection**: Top Issues panel shows CPU % distribution
 5. ✅ **Testing worker visualization**: Worker Bars show load across executor threads
-6. ✅ **Testing timeline export**: Chrome trace format for temporal analysis
+6. ✅ **Testing timeline export**: Trace Event format for temporal analysis
 7. ✅ **Testing smart labeling**: Distinguishes user code, std lib, scheduler events
 8. ✅ **Performance baseline**: eBPF overhead is negligible (<5% CPU)
 

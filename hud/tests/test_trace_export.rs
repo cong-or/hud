@@ -1,4 +1,4 @@
-use hud::export::ChromeTraceExporter;
+use hud::export::TraceEventExporter;
 use hud::symbolization::Symbolizer;
 use hud::tui::TraceData;
 
@@ -9,7 +9,7 @@ fn test_export_creates_valid_json() {
     let symbolizer = Symbolizer::new(binary_path).expect("Failed to create symbolizer");
 
     // Create an exporter and export to an in-memory buffer
-    let exporter = ChromeTraceExporter::new(symbolizer);
+    let exporter = TraceEventExporter::new(symbolizer);
     let mut buffer = Vec::new();
 
     exporter.export(&mut buffer).expect("Failed to export trace");
