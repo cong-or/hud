@@ -7,11 +7,13 @@
 //! - eBPF program loading and setup
 //! - Debug diagnostics
 //! - Event display formatting
+//! - Event processing logic
 
 pub mod cpu_utils;
 pub mod diagnostics;
 pub mod ebpf_setup;
 pub mod event_display;
+pub mod event_processor;
 pub mod stack_resolver;
 pub mod worker_discovery;
 
@@ -26,6 +28,7 @@ pub use event_display::{
     display_execution_event, display_progress, display_scheduler_detected, display_statistics,
     DetectionStats,
 };
+pub use event_processor::EventProcessor;
 pub use stack_resolver::StackResolver;
 pub use worker_discovery::{identify_tokio_workers, WorkerInfo};
 
