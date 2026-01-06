@@ -60,36 +60,38 @@ pub fn attach_blocking_uprobes(
 
     // Attach uprobe to tokio::runtime::context::set_current_task_id
     // Note: This symbol may not exist in release builds (gets inlined)
-    let task_id_attached = if let Some(program) = bpf.program_mut("set_task_id_hook") { match program.try_into() {
-        Ok(program) => {
-            let program: &mut UProbe = program;
-            if let Err(e) = program.load() {
-                warn!("⚠️  Failed to load set_task_id_hook: {e}");
-                false
-            } else {
-                match program.attach(
-                    Some("_ZN5tokio7runtime7context19set_current_task_id17h88510a52941c215fE"),
-                    0,
-                    target_path,
-                    pid,
-                ) {
-                    Ok(_) => {
-                        info!("✓ Attached uprobe: set_current_task_id");
-                        true
-                    }
-                    Err(e) => {
-                        warn!("⚠️  Could not attach set_task_id_hook: {e}");
-                        warn!("   Task ID tracking unavailable (symbol likely inlined in release build)");
-                        false
+    let task_id_attached = if let Some(program) = bpf.program_mut("set_task_id_hook") {
+        match program.try_into() {
+            Ok(program) => {
+                let program: &mut UProbe = program;
+                if let Err(e) = program.load() {
+                    warn!("⚠️  Failed to load set_task_id_hook: {e}");
+                    false
+                } else {
+                    match program.attach(
+                        Some("_ZN5tokio7runtime7context19set_current_task_id17h88510a52941c215fE"),
+                        0,
+                        target_path,
+                        pid,
+                    ) {
+                        Ok(_) => {
+                            info!("✓ Attached uprobe: set_current_task_id");
+                            true
+                        }
+                        Err(e) => {
+                            warn!("⚠️  Could not attach set_task_id_hook: {e}");
+                            warn!("   Task ID tracking unavailable (symbol likely inlined in release build)");
+                            false
+                        }
                     }
                 }
             }
+            Err(e) => {
+                warn!("⚠️  Failed to convert set_task_id_hook: {e}");
+                false
+            }
         }
-        Err(e) => {
-            warn!("⚠️  Failed to convert set_task_id_hook: {e}");
-            false
-        }
-    } } else {
+    } else {
         warn!("⚠️  set_task_id_hook program not found");
         false
     };

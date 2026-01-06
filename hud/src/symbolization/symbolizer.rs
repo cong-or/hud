@@ -96,7 +96,8 @@ impl Symbolizer {
     }
 
     /// Demangle a Rust symbol name
-    #[must_use] pub fn demangle_symbol(symbol: &str) -> String {
+    #[must_use]
+    pub fn demangle_symbol(symbol: &str) -> String {
         format!("{:#}", demangle(symbol))
     }
 }
@@ -125,7 +126,8 @@ pub struct SourceLocation {
 
 impl ResolvedFrame {
     /// Format the frame for display
-    #[must_use] pub fn format(&self, frame_num: usize) -> String {
+    #[must_use]
+    pub fn format(&self, frame_num: usize) -> String {
         let mut output = String::new();
 
         for (idx, inlined) in self.frames.iter().enumerate() {

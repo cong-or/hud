@@ -101,7 +101,6 @@ pub struct DetectionStats {
     pub scheduler_detected: u64,
 }
 
-
 /// Display detection statistics
 pub fn display_statistics(stats: &DetectionStats) {
     println!("\n📊 Detection Statistics (last 10s):");

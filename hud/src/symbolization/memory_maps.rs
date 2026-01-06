@@ -17,7 +17,8 @@ pub struct MemoryRange {
 
 impl MemoryRange {
     /// Check if an address falls within this memory range
-    #[must_use] pub fn contains(&self, addr: u64) -> bool {
+    #[must_use]
+    pub fn contains(&self, addr: u64) -> bool {
         addr >= self.start && addr < self.end
     }
 }

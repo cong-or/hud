@@ -121,7 +121,8 @@ impl FunctionName {
     }
 
     /// Get the function name as a string slice
-    #[must_use] pub fn as_str(&self) -> &str {
+    #[must_use]
+    pub fn as_str(&self) -> &str {
         &self.0
     }
 }
@@ -152,17 +153,20 @@ pub struct Timestamp(pub u64);
 
 impl Timestamp {
     /// Convert to seconds (f64)
-    #[must_use] pub fn as_seconds(self) -> f64 {
+    #[must_use]
+    pub fn as_seconds(self) -> f64 {
         self.0 as f64 / 1_000_000_000.0
     }
 
     /// Convert to microseconds (u64)
-    #[must_use] pub fn as_micros(self) -> u64 {
+    #[must_use]
+    pub fn as_micros(self) -> u64 {
         self.0 / 1_000
     }
 
     /// Convert to milliseconds (f64)
-    #[must_use] pub fn as_millis(self) -> f64 {
+    #[must_use]
+    pub fn as_millis(self) -> f64 {
         self.0 as f64 / 1_000_000.0
     }
 }
@@ -181,17 +185,20 @@ pub struct Duration(pub u64);
 
 impl Duration {
     /// Convert to milliseconds (f64)
-    #[must_use] pub fn as_millis(self) -> f64 {
+    #[must_use]
+    pub fn as_millis(self) -> f64 {
         self.0 as f64 / 1_000_000.0
     }
 
     /// Convert to seconds (f64)
-    #[must_use] pub fn as_seconds(self) -> f64 {
+    #[must_use]
+    pub fn as_seconds(self) -> f64 {
         self.0 as f64 / 1_000_000_000.0
     }
 
     /// Convert to microseconds (u64)
-    #[must_use] pub fn as_micros(self) -> u64 {
+    #[must_use]
+    pub fn as_micros(self) -> u64 {
         self.0 / 1_000
     }
 }

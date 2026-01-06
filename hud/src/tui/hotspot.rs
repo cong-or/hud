@@ -24,7 +24,8 @@ pub struct HotspotView {
 }
 
 impl HotspotView {
-    #[must_use] pub fn new(data: &TraceData) -> Self {
+    #[must_use]
+    pub fn new(data: &TraceData) -> Self {
         // Use analysis module to compute hotspots
         let hotspots = analyze_hotspots(data);
 
@@ -54,7 +55,8 @@ impl HotspotView {
         }
     }
 
-    #[must_use] pub fn get_selected(&self) -> Option<&FunctionHotspot> {
+    #[must_use]
+    pub fn get_selected(&self) -> Option<&FunctionHotspot> {
         self.hotspots.get(self.selected_index)
     }
 
@@ -84,7 +86,8 @@ impl HotspotView {
         self.scroll_offset = 0;
     }
 
-    #[must_use] pub fn is_filtered(&self) -> bool {
+    #[must_use]
+    pub fn is_filtered(&self) -> bool {
         self.filter_active
     }
 
@@ -241,10 +244,7 @@ impl HotspotView {
                     lines.push(Line::from(vec![
                         Span::raw("     "),
                         Span::styled("📍 ", Style::default().fg(INFO_DIM)),
-                        Span::styled(
-                            format!("{filename}:{line}"),
-                            Style::default().fg(INFO_DIM),
-                        ),
+                        Span::styled(format!("{filename}:{line}"), Style::default().fg(INFO_DIM)),
                     ]));
                 }
             }

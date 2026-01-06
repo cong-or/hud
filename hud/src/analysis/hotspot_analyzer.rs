@@ -32,7 +32,8 @@ type FunctionData = (HashMap<u32, usize>, Option<String>, Option<u32>);
 ///
 /// # Returns
 /// A vector of function hotspots sorted by count (most frequent first)
-#[must_use] pub fn analyze_hotspots(data: &TraceData) -> Vec<FunctionHotspot> {
+#[must_use]
+pub fn analyze_hotspots(data: &TraceData) -> Vec<FunctionHotspot> {
     // Aggregate events by function name, capturing file/line from first occurrence
     let mut function_data: HashMap<String, FunctionData> = HashMap::new();
 

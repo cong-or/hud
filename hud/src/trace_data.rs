@@ -45,7 +45,8 @@ impl Default for LiveData {
 
 impl LiveData {
     /// Create a new empty live data set
-    #[must_use] pub fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         Self {
             events: Vec::new(),
             workers_set: HashSet::new(),
@@ -77,12 +78,14 @@ impl LiveData {
     }
 
     /// Get event count
-    #[must_use] pub fn event_count(&self) -> usize {
+    #[must_use]
+    pub fn event_count(&self) -> usize {
         self.events.len()
     }
 
     /// Convert to `TraceData` for compatibility with existing TUI code
-    #[must_use] pub fn as_trace_data(&self) -> TraceData {
+    #[must_use]
+    pub fn as_trace_data(&self) -> TraceData {
         TraceData {
             events: self.events.clone(),
             workers: self.workers.clone(),

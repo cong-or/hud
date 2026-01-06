@@ -34,7 +34,7 @@ mod workers;
 
 use hotspot::HotspotView;
 use status::StatusPanel;
-use theme::{CAUTION_AMBER, CRITICAL_RED, HUD_GREEN, INFO_DIM, BACKGROUND};
+use theme::{BACKGROUND, CAUTION_AMBER, CRITICAL_RED, HUD_GREEN, INFO_DIM};
 use timeline::TimelineView;
 use workers::WorkersPanel;
 
@@ -64,7 +64,8 @@ pub struct App {
 }
 
 impl App {
-    #[must_use] pub fn new(data: TraceData) -> Self {
+    #[must_use]
+    pub fn new(data: TraceData) -> Self {
         let status_panel = StatusPanel::new(&data);
         let hotspot_view = HotspotView::new(&data);
         let workers_panel = WorkersPanel::new(&data);
@@ -654,8 +655,7 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
                     .split(f.area());
 
                 // Header with live indicator
-                let pid_display =
-                    pid.map_or_else(|| "unknown".to_string(), |p| p.to_string());
+                let pid_display = pid.map_or_else(|| "unknown".to_string(), |p| p.to_string());
                 let header = Paragraph::new(vec![Line::from(vec![
                     Span::styled(
                         "hud",

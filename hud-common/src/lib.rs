@@ -65,10 +65,10 @@ pub struct ThreadState {
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct WorkerInfo {
-    pub worker_id: u32,    // Worker thread index (0, 1, 2, ...)
-    pub pid: u32,          // Process ID
-    pub comm: [u8; 16],    // Thread name (e.g., "tokio-runtime-w")
-    pub is_active: u8,     // 1 if currently active, 0 if terminated
+    pub worker_id: u32, // Worker thread index (0, 1, 2, ...)
+    pub pid: u32,       // Process ID
+    pub comm: [u8; 16], // Thread name (e.g., "tokio-runtime-w")
+    pub is_active: u8,  // 1 if currently active, 0 if terminated
     #[allow(clippy::pub_underscore_fields)]
     pub _padding: [u8; 3], // Padding for alignment
 }
@@ -82,7 +82,7 @@ pub struct ExecutionSpan {
     pub stack_id: i64,      // Stack trace at start
     pub cpu_id: u32,        // CPU core
     #[allow(clippy::pub_underscore_fields)]
-    pub _padding: [u8; 4],  // Padding for alignment
+    pub _padding: [u8; 4], // Padding for alignment
 }
 
 impl Default for ExecutionSpan {
