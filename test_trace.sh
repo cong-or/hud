@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "🔍 runtime-scope - Chrome Trace Export Test"
+echo "🔍 hud - Chrome Trace Export Test"
 echo "=========================================="
 echo ""
 
@@ -15,8 +15,8 @@ echo "📦 Building eBPF program..."
 RUSTFLAGS="-C force-frame-pointers=yes" cargo xtask build-ebpf --release
 
 echo ""
-echo "📦 Building runtime-scope..."
-RUSTFLAGS="-C force-frame-pointers=yes" cargo build --release -p runtime-scope
+echo "📦 Building hud..."
+RUSTFLAGS="-C force-frame-pointers=yes" cargo build --release -p hud
 
 echo ""
 echo "📦 Building test-async-app (with debug symbols)..."
@@ -41,7 +41,7 @@ echo ""
 # Refresh sudo credentials (should not prompt now)
 sudo -v
 
-sudo -E ./target/release/runtime-scope \
+sudo -E ./target/release/hud \
   --pid $APP_PID \
   --target ./target/release/examples/test-async-app \
   --trace \

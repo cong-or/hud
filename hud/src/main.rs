@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use aya::maps::{RingBuf, StackTraceMap};
 use clap::Parser;
 use log::{info, warn};
-use runtime_scope_common::{
+use hud_common::{
     TaskEvent,
     EVENT_BLOCKING_END, EVENT_BLOCKING_START, EVENT_SCHEDULER_DETECTED,
     TRACE_EXECUTION_START, TRACE_EXECUTION_END,
@@ -10,20 +10,20 @@ use runtime_scope_common::{
 use std::fs::File;
 use std::io::BufWriter;
 use std::time::{Duration, Instant};
-use runtime_scope::export::ChromeTraceExporter;
-use runtime_scope::symbolization::{parse_memory_maps, Symbolizer};
+use hud::export::ChromeTraceExporter;
+use hud::symbolization::{parse_memory_maps, Symbolizer};
 
 // Import modules
-use runtime_scope::cli::Args;
-use runtime_scope::domain::StackId;
-use runtime_scope::profiling::{
+use hud::cli::Args;
+use hud::domain::StackId;
+use hud::profiling::{
     attach_blocking_uprobes, init_ebpf_logger, load_ebpf_program,
     print_perf_event_diagnostics, setup_scheduler_detection, StackResolver,
     DetectionStats, display_blocking_start, display_blocking_end, display_blocking_end_no_start,
     display_scheduler_detected, display_execution_event, display_statistics, display_progress,
 };
-use runtime_scope::trace_data::TraceData;
-use runtime_scope::tui::App;
+use hud::trace_data::TraceData;
+use hud::tui::App;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -39,7 +39,7 @@ async fn main() -> Result<()> {
         return app.run();
     }
 
-    println!("🔍 runtime-scope v0.1.0");
+    println!("🔍 hud v0.1.0");
     println!("   Real-time async runtime profiler\n");
 
     // Determine target binary and make it absolute

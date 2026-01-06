@@ -7,7 +7,7 @@ echo ""
 # Build
 echo "🔧 Building..."
 cargo xtask build-ebpf --release > /dev/null 2>&1
-cargo build --release -p runtime-scope > /dev/null 2>&1
+cargo build --release -p hud > /dev/null 2>&1
 cargo build --release --example test-async-app > /dev/null 2>&1
 echo "✓ Build complete"
 echo ""
@@ -25,7 +25,7 @@ echo "📊 Starting profiler... (Press Ctrl+C to stop)"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
-sudo -E ./target/release/runtime-scope \
+sudo -E ./target/release/hud \
   --pid $TEST_PID \
   --target ./target/release/examples/test-async-app \
   --trace

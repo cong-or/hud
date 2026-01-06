@@ -1,5 +1,5 @@
 [package]
-name = "runtime-scope"
+name = "hud"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,7 +8,7 @@ aya = { workspace = true }
 aya-log = { workspace = true }
 anyhow = { workspace = true }
 tokio = { workspace = true }
-runtime-scope-common = { path = "../runtime-scope-common", features = ["user"] }
+hud-common = { path = "../hud-common", features = ["user"] }
 clap = { version = "4.5", features = ["derive"] }
 env_logger = "0.11"
 log = "0.4"

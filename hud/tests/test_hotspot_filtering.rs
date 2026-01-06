@@ -1,4 +1,4 @@
-use runtime_scope::tui::{TraceData, hotspot::HotspotView};
+use hud::tui::{TraceData, hotspot::HotspotView};
 
 #[test]
 fn test_hotspot_aggregates_events_by_function_name() {

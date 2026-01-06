@@ -1,4 +1,4 @@
-//! Test async application for runtime-scope profiling
+//! Test async application for hud profiling
 //!
 //! This app demonstrates:
 //! - Well-behaved async tasks (lots of awaiting)
@@ -6,7 +6,7 @@
 //! - Task spawn patterns
 //!
 //! Run with: cargo run --example test-async-app
-//! Profile with: sudo runtime-scope --pid <pid>
+//! Profile with: sudo hud --pid <pid>
 
 use std::time::Duration;
 use tokio::time::sleep;

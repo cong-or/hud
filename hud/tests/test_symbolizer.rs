@@ -1,9 +1,9 @@
-use runtime_scope::symbolization::Symbolizer;
+use hud::symbolization::Symbolizer;
 
 #[test]
 fn test_symbolizer_creation() {
     // Test that we can create a symbolizer for a binary
-    let binary_path = env!("CARGO_BIN_EXE_runtime-scope");
+    let binary_path = env!("CARGO_BIN_EXE_hud");
 
     println!("Testing symbolizer creation on: {}", binary_path);
 
@@ -16,7 +16,7 @@ fn test_symbolizer_creation() {
 #[test]
 fn test_symbolizer_resolves_function_names() {
     // Test that the symbolizer can resolve addresses to function names
-    let binary_path = env!("CARGO_BIN_EXE_runtime-scope");
+    let binary_path = env!("CARGO_BIN_EXE_hud");
 
     println!("Testing symbolization on: {}", binary_path);
 
@@ -88,7 +88,7 @@ fn test_dwarf_debug_info_available() {
     // This test verifies that DWARF debug info with file:line is available
     // It's ignored by default because it depends on build configuration
 
-    let binary_path = env!("CARGO_BIN_EXE_runtime-scope");
+    let binary_path = env!("CARGO_BIN_EXE_hud");
     let symbolizer = Symbolizer::new(binary_path)
         .expect("Failed to create symbolizer");
 

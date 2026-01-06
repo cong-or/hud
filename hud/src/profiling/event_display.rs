@@ -1,5 +1,5 @@
 use aya::maps::{MapData, StackTraceMap};
-use runtime_scope_common::TaskEvent;
+use hud_common::TaskEvent;
 use std::borrow::Borrow;
 use crate::domain::StackId;
 use crate::profiling::StackResolver;

@@ -412,7 +412,7 @@ impl App {
                 // Header
                 let header = Paragraph::new(vec![
                     Line::from(vec![
-                        Span::styled("runtime-scope", Style::default().fg(HUD_GREEN).add_modifier(Modifier::BOLD)),
+                        Span::styled("hud", Style::default().fg(HUD_GREEN).add_modifier(Modifier::BOLD)),
                         Span::styled(" v0.1.0", Style::default().fg(INFO_DIM)),
                         Span::raw("    PID: "),
                         Span::styled("trace.json", Style::default().fg(INFO_DIM)),

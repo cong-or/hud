@@ -1,4 +1,4 @@
-//! Structured error types for runtime-scope
+//! Structured error types for hud
 //!
 //! Using thiserror for automatic Display implementation and error chaining.
 

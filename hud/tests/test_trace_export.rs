@@ -1,11 +1,11 @@
-use runtime_scope::export::ChromeTraceExporter;
-use runtime_scope::symbolization::Symbolizer;
-use runtime_scope::tui::TraceData;
+use hud::export::ChromeTraceExporter;
+use hud::symbolization::Symbolizer;
+use hud::tui::TraceData;
 
 #[test]
 fn test_export_creates_valid_json() {
     // Create a symbolizer (we can use any binary for testing)
-    let binary_path = env!("CARGO_BIN_EXE_runtime-scope");
+    let binary_path = env!("CARGO_BIN_EXE_hud");
     let symbolizer = Symbolizer::new(binary_path).expect("Failed to create symbolizer");
 
     // Create an exporter and export to an in-memory buffer

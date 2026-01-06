@@ -1,4 +1,4 @@
-//! Command-line interface for runtime-scope
+//! Command-line interface for hud
 //!
 //! This module contains CLI argument parsing and configuration
 

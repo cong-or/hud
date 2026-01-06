@@ -33,7 +33,7 @@ fn build_ebpf(target: String, release: bool) -> Result<()> {
     cmd.arg("+nightly")
         .arg("build")
         .arg("--package")
-        .arg("runtime-scope-ebpf")
+        .arg("hud-ebpf")
         .arg("--target")
         .arg(&target)
         .arg("-Z")

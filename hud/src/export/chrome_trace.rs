@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use runtime_scope_common::{TaskEvent, TRACE_EXECUTION_END, TRACE_EXECUTION_START};
+use hud_common::{TaskEvent, TRACE_EXECUTION_END, TRACE_EXECUTION_START};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
@@ -208,8 +208,8 @@ impl ChromeTraceExporter {
     ///
     /// # Example
     /// ```
-    /// use runtime_scope::export::ChromeTraceExporter;
-    /// use runtime_scope::symbolization::Symbolizer;
+    /// use hud::export::ChromeTraceExporter;
+    /// use hud::symbolization::Symbolizer;
     /// use std::fs::File;
     /// use std::io::BufWriter;
     ///

@@ -1,8 +1,8 @@
 [workspace]
 members = [
-    "runtime-scope",
-    "runtime-scope-ebpf",
-    "runtime-scope-common",
+    "hud",
+    "hud-ebpf",
+    "hud-common",
     "xtask",
 ]
 resolver = "2"

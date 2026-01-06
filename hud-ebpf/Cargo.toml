@@ -1,15 +1,15 @@
 [package]
-name = "runtime-scope-ebpf"
+name = "hud-ebpf"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 aya-ebpf = "0.1"
 aya-log-ebpf = "0.1"
-runtime-scope-common = { path = "../runtime-scope-common" }
+hud-common = { path = "../hud-common" }
 
 [[bin]]
-name = "runtime-scope"
+name = "hud"
 path = "src/main.rs"
 
 [profile.dev]

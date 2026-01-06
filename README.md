@@ -1,4 +1,4 @@
-# runtime-scope
+# hud
 
 ✅ **Status: Phase 3a Complete - Glass Cockpit TUI + CPU Profiling!** ✅
 
@@ -6,11 +6,11 @@
 
 Understand how your async program works with an F-35 inspired glass cockpit interface. See which workers are busy, what functions are hot, and get instant situational awareness - all with zero instrumentation required.
 
-## What is runtime-scope?
+## What is hud?
 
 **Think: F-35 Glass Cockpit + Chrome DevTools Timeline for Rust async runtimes**
 
-runtime-scope uses eBPF with dual detection modes (scheduler events + CPU sampling) to capture execution data and displays it through an intuitive terminal UI or exports to Chrome's trace format for deep-dive analysis.
+hud uses eBPF with dual detection modes (scheduler events + CPU sampling) to capture execution data and displays it through an intuitive terminal UI or exports to Chrome's trace format for deep-dive analysis.
 
 ### Glass Cockpit TUI + Timeline Visualization
 
@@ -22,7 +22,7 @@ runtime-scope uses eBPF with dual detection modes (scheduler events + CPU sampli
 
 **Plus deep-dive timeline** for temporal analysis:
 
-| Question | Flamegraph | runtime-scope |
+| Question | Flamegraph | hud |
 |----------|-----------|--------------|
 | "What function is slow?" | ✅ Yes | ✅ Yes (instant in TUI) |
 | "Where in my code?" | ❌ No source | ✅ File:line in TUI |
@@ -72,7 +72,7 @@ runtime-scope uses eBPF with dual detection modes (scheduler events + CPU sampli
 ### Option 1: Use the test script (easiest)
 
 ```bash
-cd /home/soze/runtime-scope
+cd /home/soze/hud
 ./test.sh
 ```
 
@@ -86,7 +86,7 @@ Then view the results:
 
 ```bash
 # Option A: Glass Cockpit TUI (recommended for quick insights)
-./target/release/runtime-scope --tui trace.json
+./target/release/hud --tui trace.json
 
 # Option B: Chrome Timeline (for deep temporal analysis)
 google-chrome chrome://tracing  # then load trace.json
@@ -95,11 +95,11 @@ google-chrome chrome://tracing  # then load trace.json
 ### Option 2: Manual steps
 
 ```bash
-cd /home/soze/runtime-scope
+cd /home/soze/hud
 
 # Build everything (release mode required)
 cargo xtask build-ebpf --release
-cargo build --release -p runtime-scope
+cargo build --release -p hud
 cargo build --release --example test-async-app
 
 # Run test app
@@ -107,13 +107,13 @@ cargo build --release --example test-async-app
 TEST_PID=$!
 
 # Profile it (generates trace.json)
-sudo -E ./target/release/runtime-scope \
+sudo -E ./target/release/hud \
   --pid $TEST_PID \
   --target ./target/release/examples/test-async-app \
   --trace
 
 # View in TUI (instant insights)
-./target/release/runtime-scope --tui trace.json
+./target/release/hud --tui trace.json
 
 # Or view in Chrome (deep dive)
 google-chrome chrome://tracing  # then load trace.json
@@ -124,7 +124,7 @@ google-chrome chrome://tracing  # then load trace.json
 ### Profiling Mode
 
 ```
-runtime-scope --pid <PID> --target <PATH> [OPTIONS]
+hud --pid <PID> --target <PATH> [OPTIONS]
 
 Options:
   -p, --pid <PID>                    Process ID to attach to
@@ -138,7 +138,7 @@ Options:
 ### TUI Mode (Visualize Existing Traces)
 
 ```
-runtime-scope --tui <TRACE_FILE>
+hud --tui <TRACE_FILE>
 
 Options:
       --tui <TRACE_FILE>             Launch glass cockpit TUI for trace.json file
@@ -149,25 +149,25 @@ Options:
 
 ```bash
 # Profile and generate trace.json
-sudo -E ./target/release/runtime-scope \
+sudo -E ./target/release/hud \
   --pid $(pgrep my-app) \
   --target ./my-app \
   --trace
 
 # View results in glass cockpit TUI (recommended)
-./target/release/runtime-scope --tui trace.json
+./target/release/hud --tui trace.json
 
 # Or view in Chrome for deep timeline analysis
 google-chrome chrome://tracing  # then load trace.json
 
 # Custom trace output location
-sudo -E ./target/release/runtime-scope \
+sudo -E ./target/release/hud \
   --pid 1234 \
   --target ./my-app \
   --trace \
   --trace-output /tmp/my-trace.json
 
-./target/release/runtime-scope --tui /tmp/my-trace.json
+./target/release/hud --tui /tmp/my-trace.json
 ```
 
 **What you'll see:**
@@ -196,7 +196,7 @@ After running the profiler with `--trace`, you'll have a `trace.json` file ready
 **Fast, intuitive, terminal-based** - perfect for quick insights:
 
 ```bash
-./target/release/runtime-scope --tui trace.json
+./target/release/hud --tui trace.json
 ```
 
 **What you'll see:**
@@ -519,7 +519,7 @@ The profiler now:
 
 If you built before Jan 1, 2026, rebuild:
 ```bash
-cargo build --release -p runtime-scope
+cargo build --release -p hud
 ```
 
 ### No Events Captured
@@ -544,7 +544,7 @@ cargo build --release -p runtime-scope
 
 **Solution:** Always use `sudo -E` to preserve environment variables:
 ```bash
-sudo -E ./target/release/runtime-scope --pid <PID> --target <PATH>
+sudo -E ./target/release/hud --pid <PID> --target <PATH>
 ```
 
 ## Development Setup
@@ -579,14 +579,14 @@ cargo install bpf-linker --features llvm-21
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/runtime-scope
-cd runtime-scope
+git clone https://github.com/yourusername/hud
+cd hud
 
 # Build eBPF program
 cargo xtask build-ebpf --release
 
 # Build userspace program
-cargo build --release -p runtime-scope
+cargo build --release -p hud
 
 # Build test application
 cargo build --release --example test-async-app
@@ -602,7 +602,7 @@ cargo build --release --example test-async-app
 
 # Or manual test
 ./target/release/examples/test-async-app &
-sudo -E ./target/release/runtime-scope \
+sudo -E ./target/release/hud \
   --pid $! \
   --target ./target/release/examples/test-async-app
 
@@ -613,8 +613,8 @@ sudo -E ./target/release/runtime-scope \
 ## Project Structure
 
 ```
-runtime-scope/
-├── runtime-scope/              # Userspace profiler
+hud/
+├── hud/              # Userspace profiler
 │   ├── src/
 │   │   ├── main.rs            # Main entry point, event processing
 │   │   ├── cli/               # CLI argument parsing
@@ -632,10 +632,10 @@ runtime-scope/
 │   │   └── lib.rs             # Library exports
 │   └── examples/
 │       └── test-async-app.rs  # Test application
-├── runtime-scope-ebpf/         # eBPF programs (kernel)
+├── hud-ebpf/         # eBPF programs (kernel)
 │   └── src/
 │       └── main.rs            # perf_event + sched_switch hooks
-├── runtime-scope-common/       # Shared types
+├── hud-common/       # Shared types
 │   └── src/
 │       └── lib.rs             # Event definitions, ExecutionSpan
 ├── xtask/                      # Build automation

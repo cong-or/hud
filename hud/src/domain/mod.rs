@@ -1,4 +1,4 @@
-//! Domain model for runtime-scope
+//! Domain model for hud
 //!
 //! This module contains core domain types and errors that provide:
 //! - Compile-time safety via newtype pattern

@@ -1,10 +1,10 @@
 # Test Async Applications
 
-Example applications for testing and demonstrating runtime-scope's glass cockpit TUI and profiling capabilities.
+Example applications for testing and demonstrating hud's glass cockpit TUI and profiling capabilities.
 
 ## test-async-app
 
-A comprehensive test application designed to exercise runtime-scope's profiling features.
+A comprehensive test application designed to exercise hud's profiling features.
 
 ### What it does
 
@@ -19,7 +19,7 @@ A comprehensive test application designed to exercise runtime-scope's profiling 
 **Quick start (recommended):**
 
 ```bash
-cd /home/soze/runtime-scope
+cd /home/soze/hud
 ./test.sh
 ```
 
@@ -33,7 +33,7 @@ Then view the results:
 
 ```bash
 # Glass Cockpit TUI (recommended for instant insights)
-./target/release/runtime-scope --tui trace.json
+./target/release/hud --tui trace.json
 
 # Or Chrome Timeline (for deep temporal analysis)
 google-chrome chrome://tracing  # then load trace.json
@@ -43,7 +43,7 @@ google-chrome chrome://tracing  # then load trace.json
 
 **Terminal 1: Start the test app**
 ```bash
-cd /home/soze/runtime-scope
+cd /home/soze/hud
 cargo build --release --example test-async-app
 ./target/release/examples/test-async-app
 ```
@@ -53,29 +53,29 @@ You'll see:
 - Every ~1 second: blocking task does CPU work
 - Activity continues with varied patterns
 
-**Terminal 2: Profile with runtime-scope**
+**Terminal 2: Profile with hud**
 ```bash
-cd /home/soze/runtime-scope
+cd /home/soze/hud
 
 # Build everything first
 cargo xtask build-ebpf --release
-cargo build --release -p runtime-scope
+cargo build --release -p hud
 
 # Run the profiler (requires sudo for eBPF)
-sudo -E ./target/release/runtime-scope \
+sudo -E ./target/release/hud \
   --pid $(pgrep test-async-app) \
   --target ./target/release/examples/test-async-app \
   --trace
 
 # View in glass cockpit TUI
-./target/release/runtime-scope --tui trace.json
+./target/release/hud --tui trace.json
 ```
 
 ### Expected Output
 
 **During profiling:**
 ```
-🔍 runtime-scope
+🔍 hud
 📊 Profiling PID 12345 for 30 seconds...
 ⏱️  Collecting events... [████████░░] 20s
 ```
@@ -127,7 +127,7 @@ sudo -E ./target/release/runtime-scope \
 
 **CPU Profiling via perf_event:**
 
-runtime-scope uses **perf_event** for CPU sampling - no code instrumentation needed! The profiler:
+hud uses **perf_event** for CPU sampling - no code instrumentation needed! The profiler:
 1. Attaches perf_event to all Tokio worker threads
 2. Samples at 99 Hz to capture what's executing
 3. Captures user-space stack traces on each sample

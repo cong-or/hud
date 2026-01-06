@@ -663,6 +663,47 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
+name = "hud"
+version = "0.1.0"
+dependencies = [
+ "addr2line",
+ "anyhow",
+ "aya",
+ "aya-log",
+ "clap",
+ "crossterm",
+ "env_logger",
+ "futures",
+ "gimli",
+ "hud-common",
+ "log",
+ "object",
+ "ratatui",
+ "rustc-demangle",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.17",
+ "tokio",
+]
+
+[[package]]
+name = "hud-common"
+version = "0.1.0"
+dependencies = [
+ "aya",
+]
+
+[[package]]
+name = "hud-ebpf"
+version = "0.1.0"
+dependencies = [
+ "aya-ebpf",
+ "aya-log-ebpf",
+ "hud-common",
+]
+
+[[package]]
 name = "ident_case"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1021,47 +1062,6 @@ name = "regex-syntax"
 version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a2d987857b319362043e95f5353c0535c1f58eec5336fdfcf626430af7def58"
-
-[[package]]
-name = "runtime-scope"
-version = "0.1.0"
-dependencies = [
- "addr2line",
- "anyhow",
- "aya",
- "aya-log",
- "clap",
- "crossterm",
- "env_logger",
- "futures",
- "gimli",
- "log",
- "object",
- "ratatui",
- "runtime-scope-common",
- "rustc-demangle",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.17",
- "tokio",
-]
-
-[[package]]
-name = "runtime-scope-common"
-version = "0.1.0"
-dependencies = [
- "aya",
-]
-
-[[package]]
-name = "runtime-scope-ebpf"
-version = "0.1.0"
-dependencies = [
- "aya-ebpf",
- "aya-log-ebpf",
- "runtime-scope-common",
-]
 
 [[package]]
 name = "rustc-demangle"

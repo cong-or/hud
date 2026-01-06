@@ -9,7 +9,7 @@ use aya::{
 };
 use aya_log::EbpfLogger;
 use log::{info, warn};
-use runtime_scope_common::WorkerInfo;
+use hud_common::WorkerInfo;
 
 use crate::domain::Pid;
 use crate::profiling::{identify_tokio_workers, online_cpus};
@@ -18,11 +18,11 @@ use crate::profiling::{identify_tokio_workers, online_cpus};
 pub fn load_ebpf_program() -> Result<Ebpf> {
     #[cfg(debug_assertions)]
     let bpf = Ebpf::load(include_bytes_aligned!(
-        "../../../target/bpfel-unknown-none/debug/runtime-scope"
+        "../../../target/bpfel-unknown-none/debug/hud"
     ))?;
     #[cfg(not(debug_assertions))]
     let bpf = Ebpf::load(include_bytes_aligned!(
-        "../../../target/bpfel-unknown-none/release/runtime-scope"
+        "../../../target/bpfel-unknown-none/release/hud"
     ))?;
 
     Ok(bpf)

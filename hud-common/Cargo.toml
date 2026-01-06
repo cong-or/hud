@@ -1,5 +1,5 @@
 [package]
-name = "runtime-scope-common"
+name = "hud-common"
 version = "0.1.0"
 edition = "2021"
 

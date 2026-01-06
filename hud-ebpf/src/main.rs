@@ -8,7 +8,7 @@ use aya_ebpf::{
     helpers::{bpf_ktime_get_ns, bpf_get_current_pid_tgid},
     EbpfContext,
 };
-use runtime_scope_common::{
+use hud_common::{
     TaskEvent, ThreadState, WorkerInfo, SchedSwitchArgs, ExecutionSpan,
     EVENT_BLOCKING_START, EVENT_BLOCKING_END, EVENT_SCHEDULER_DETECTED,
     TRACE_EXECUTION_START, TRACE_EXECUTION_END,

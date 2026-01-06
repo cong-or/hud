@@ -1,4 +1,4 @@
-use runtime_scope::tui::TraceData;
+use hud::tui::TraceData;
 
 #[test]
 fn test_parse_trace_from_file_succeeds() {
