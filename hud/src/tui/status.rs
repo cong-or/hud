@@ -17,9 +17,8 @@ pub struct StatusPanel {
 impl StatusPanel {
     pub fn new(data: &TraceData) -> Self {
         // Find busiest worker using functional fold
-        let worker_activity = data.events
-            .iter()
-            .fold(std::collections::HashMap::new(), |mut acc, event| {
+        let worker_activity =
+            data.events.iter().fold(std::collections::HashMap::new(), |mut acc, event| {
                 let entry = acc.entry(event.worker_id).or_insert((0, 0));
                 entry.0 += 1; // total samples
                 if event.name != "execution" {
@@ -40,8 +39,11 @@ impl StatusPanel {
                 },
             )
             .map(|(worker_id, (total, with_funcs))| {
-                let percentage =
-                    if *total > 0 { (f64::from(*with_funcs) / f64::from(*total)) * 100.0 } else { 0.0 };
+                let percentage = if *total > 0 {
+                    (f64::from(*with_funcs) / f64::from(*total)) * 100.0
+                } else {
+                    0.0
+                };
                 (*worker_id, percentage)
             });
 

@@ -11,7 +11,6 @@ use super::{severity_marker, CAUTION_AMBER, INFO_DIM};
 use crate::analysis::{analyze_hotspots, FunctionHotspot};
 use crate::trace_data::TraceData;
 
-
 /// Hotspot view showing top functions by sample count
 pub struct HotspotView {
     scroll_offset: usize,
@@ -101,7 +100,8 @@ impl HotspotView {
         let worker_set: HashSet<u32> = worker_ids.iter().copied().collect();
 
         // Rebuild hotspots from filtered events using functional fold
-        let function_data = data.events
+        let function_data = data
+            .events
             .iter()
             .filter(|event| worker_set.contains(&event.worker_id))
             .fold(HashMap::new(), |mut acc, event| {

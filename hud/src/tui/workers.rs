@@ -22,19 +22,17 @@ struct WorkerStats {
 
 impl WorkersPanel {
     pub fn new(data: &TraceData) -> Self {
-        let worker_stats = data.events
-            .iter()
-            .fold(HashMap::new(), |mut acc, event| {
-                let stats = acc
-                    .entry(event.worker_id)
-                    .or_insert(WorkerStats { total_samples: 0, samples_with_functions: 0 });
+        let worker_stats = data.events.iter().fold(HashMap::new(), |mut acc, event| {
+            let stats = acc
+                .entry(event.worker_id)
+                .or_insert(WorkerStats { total_samples: 0, samples_with_functions: 0 });
 
-                stats.total_samples += 1;
-                if event.name != "execution" {
-                    stats.samples_with_functions += 1;
-                }
-                acc
-            });
+            stats.total_samples += 1;
+            if event.name != "execution" {
+                stats.samples_with_functions += 1;
+            }
+            acc
+        });
 
         Self { worker_stats }
     }

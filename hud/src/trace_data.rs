@@ -127,16 +127,7 @@ impl TraceData {
                 let file = event["args"]["file"].as_str().map(std::string::ToString::to_string);
                 let line = event["args"]["line"].as_u64().map(|v| v as u32);
 
-                TraceEvent {
-                    name,
-                    worker_id,
-                    tid,
-                    timestamp,
-                    cpu,
-                    detection_method,
-                    file,
-                    line,
-                }
+                TraceEvent { name, worker_id, tid, timestamp, cpu, detection_method, file, line }
             })
             .collect();
 
@@ -149,10 +140,7 @@ impl TraceData {
             .collect();
         workers.sort_unstable();
 
-        let max_timestamp = events
-            .iter()
-            .map(|e| e.timestamp)
-            .fold(0.0f64, f64::max);
+        let max_timestamp = events.iter().map(|e| e.timestamp).fold(0.0f64, f64::max);
 
         Ok(TraceData {
             events: Arc::new(events),
