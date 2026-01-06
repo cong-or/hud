@@ -28,7 +28,7 @@ echo ""
 sudo -E ./target/release/hud \
   --pid $TEST_PID \
   --target ./target/release/examples/test-async-app \
-  --trace
+  --duration 30
 
 # Cleanup
 echo ""
