@@ -11,6 +11,56 @@ use super::{severity_marker, CAUTION_AMBER, INFO_DIM};
 use crate::analysis::{analyze_hotspots, FunctionHotspot};
 use crate::trace_data::TraceData;
 
+// Pure data operations (filtering logic separated from UI state)
+
+/// Filter hotspots by function name (case-insensitive substring match)
+fn filter_by_name(hotspots: &[FunctionHotspot], query: &str) -> Vec<FunctionHotspot> {
+    if query.is_empty() {
+        return hotspots.to_vec();
+    }
+
+    let query_lower = query.to_lowercase();
+    hotspots.iter().filter(|h| h.name.to_lowercase().contains(&query_lower)).cloned().collect()
+}
+
+/// Rebuild hotspots from events filtered by worker IDs
+fn rebuild_hotspots_for_workers(data: &TraceData, worker_ids: &[u32]) -> Vec<FunctionHotspot> {
+    use std::collections::HashSet;
+
+    let worker_set: HashSet<u32> = worker_ids.iter().copied().collect();
+
+    // Rebuild hotspots from filtered events using functional fold
+    let function_data = data
+        .events
+        .iter()
+        .filter(|event| worker_set.contains(&event.worker_id))
+        .fold(HashMap::new(), |mut acc, event| {
+            let entry = acc
+                .entry(event.name.clone())
+                .or_insert_with(|| (HashMap::new(), event.file.clone(), event.line));
+            *entry.0.entry(event.worker_id).or_insert(0) += 1;
+            acc
+        });
+
+    // Convert to vector and calculate percentages
+    let total_samples = data.events.iter().filter(|e| worker_set.contains(&e.worker_id)).count();
+    let mut hotspots: Vec<FunctionHotspot> = function_data
+        .into_iter()
+        .map(|(name, (workers, file, line))| {
+            let count: usize = workers.values().sum();
+            let percentage = (count as f64 / total_samples as f64) * 100.0;
+            FunctionHotspot { name, count, percentage, workers, file, line }
+        })
+        .collect();
+
+    // Sort by count (descending)
+    hotspots.sort_by(|a, b| b.count.cmp(&a.count));
+
+    hotspots
+}
+
+// UI Component
+
 /// Hotspot view showing top functions by sample count
 pub struct HotspotView {
     scroll_offset: usize,
@@ -63,14 +113,7 @@ impl HotspotView {
             return;
         }
 
-        let query_lower = query.to_lowercase();
-        self.hotspots = self
-            .all_hotspots
-            .iter()
-            .filter(|h| h.name.to_lowercase().contains(&query_lower))
-            .cloned()
-            .collect();
-
+        self.hotspots = filter_by_name(&self.all_hotspots, query);
         self.filter_active = true;
         self.selected_index = 0;
         self.scroll_offset = 0;
@@ -89,45 +132,13 @@ impl HotspotView {
     }
 
     pub fn filter_by_workers(&mut self, worker_ids: &[u32], data: &TraceData) {
-        use std::collections::HashSet;
-
         if worker_ids.len() == data.workers.len() {
             // All workers selected, no filtering needed
             self.clear_filter();
             return;
         }
 
-        let worker_set: HashSet<u32> = worker_ids.iter().copied().collect();
-
-        // Rebuild hotspots from filtered events using functional fold
-        let function_data = data
-            .events
-            .iter()
-            .filter(|event| worker_set.contains(&event.worker_id))
-            .fold(HashMap::new(), |mut acc, event| {
-                let entry = acc
-                    .entry(event.name.clone())
-                    .or_insert_with(|| (HashMap::new(), event.file.clone(), event.line));
-                *entry.0.entry(event.worker_id).or_insert(0) += 1;
-                acc
-            });
-
-        // Convert to vector and calculate percentages
-        let total_samples =
-            data.events.iter().filter(|e| worker_set.contains(&e.worker_id)).count();
-        let mut hotspots: Vec<FunctionHotspot> = function_data
-            .into_iter()
-            .map(|(name, (workers, file, line))| {
-                let count: usize = workers.values().sum();
-                let percentage = (count as f64 / total_samples as f64) * 100.0;
-                FunctionHotspot { name, count, percentage, workers, file, line }
-            })
-            .collect();
-
-        // Sort by count (descending)
-        hotspots.sort_by(|a, b| b.count.cmp(&a.count));
-
-        self.hotspots = hotspots;
+        self.hotspots = rebuild_hotspots_for_workers(data, worker_ids);
         self.filter_active = true;
         self.selected_index = 0;
         self.scroll_offset = 0;
