@@ -73,7 +73,11 @@ impl<'a> EventProcessor<'a> {
     }
 
     /// Process a single event
-    pub fn process_event<T: std::borrow::Borrow<aya::maps::MapData>>(&mut self, event: TaskEvent, stack_traces: &aya::maps::StackTraceMap<T>) {
+    pub fn process_event<T: std::borrow::Borrow<aya::maps::MapData>>(
+        &mut self,
+        event: TaskEvent,
+        stack_traces: &aya::maps::StackTraceMap<T>,
+    ) {
         self.event_count += 1;
 
         match event.event_type {
@@ -97,17 +101,19 @@ impl<'a> EventProcessor<'a> {
     // Private event handlers
 
     fn handle_blocking_start(&mut self, event: TaskEvent) {
-        self.blocking_state = Some(BlockingState {
-            start_time_ns: event.timestamp_ns,
-            stack_id: event.stack_id,
-        });
+        self.blocking_state =
+            Some(BlockingState { start_time_ns: event.timestamp_ns, stack_id: event.stack_id });
 
         if self.headless {
             display_blocking_start(&event);
         }
     }
 
-    fn handle_blocking_end<T: std::borrow::Borrow<aya::maps::MapData>>(&mut self, event: TaskEvent, stack_traces: &StackTraceMap<T>) {
+    fn handle_blocking_end<T: std::borrow::Borrow<aya::maps::MapData>>(
+        &mut self,
+        event: TaskEvent,
+        stack_traces: &StackTraceMap<T>,
+    ) {
         if let Some(state) = self.blocking_state {
             self.stats.marker_detected += 1;
 
@@ -127,7 +133,11 @@ impl<'a> EventProcessor<'a> {
         }
     }
 
-    fn handle_scheduler_detected<T: std::borrow::Borrow<aya::maps::MapData>>(&mut self, event: TaskEvent, stack_traces: &StackTraceMap<T>) {
+    fn handle_scheduler_detected<T: std::borrow::Borrow<aya::maps::MapData>>(
+        &mut self,
+        event: TaskEvent,
+        stack_traces: &StackTraceMap<T>,
+    ) {
         self.stats.scheduler_detected += 1;
 
         if self.headless {
@@ -135,9 +145,14 @@ impl<'a> EventProcessor<'a> {
         }
     }
 
-    fn handle_trace_execution<T: std::borrow::Borrow<aya::maps::MapData>>(&mut self, event: TaskEvent, stack_traces: &StackTraceMap<T>) {
+    fn handle_trace_execution<T: std::borrow::Borrow<aya::maps::MapData>>(
+        &mut self,
+        event: TaskEvent,
+        stack_traces: &StackTraceMap<T>,
+    ) {
         // Get the top frame address for symbol resolution
-        let top_frame_addr = StackResolver::get_top_frame_addr(StackId(event.stack_id), stack_traces);
+        let top_frame_addr =
+            StackResolver::get_top_frame_addr(StackId(event.stack_id), stack_traces);
 
         // Add to trace exporter if enabled
         if let Some(ref mut exporter) = self.trace_exporter {
