@@ -141,13 +141,6 @@ cargo install bpf-linker --features llvm-21
 - [Troubleshooting](docs/TROUBLESHOOTING.md) - Common issues and solutions
 - [Development](docs/DEVELOPMENT.md) - Contributing and building from source
 
-## Project Status
-
-✅ **Production Ready** - Live profiling with real-time TUI
-🎯 **Active Development** - Enhanced interactive features
-
-See [ROADMAP.md](docs/ROADMAP.md) for planned features.
-
 ## Why hud?
 
 | Flamegraph | hud |
@@ -163,12 +156,6 @@ See [ROADMAP.md](docs/ROADMAP.md) for planned features.
 ## License
 
 MIT or Apache-2.0 (dual licensed)
-
-## Built With
-
-[Aya](https://aya-rs.dev/) • [ratatui](https://ratatui.rs/) • [addr2line](https://github.com/gimli-rs/addr2line)
-
-Inspired by F-35 glass cockpits and Brendan Gregg's performance tools.
 
 ---
 
