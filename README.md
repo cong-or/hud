@@ -2,28 +2,21 @@
 
 **F-35 inspired heads-up display for Rust async programs**
 
-See what your async runtime is actually doing - zero instrumentation required.
+See what your async runtime is actually doing - live, with zero instrumentation.
 
 ```bash
-# Profile any Tokio app
-sudo ./hud --pid $(pgrep my-app) --target ./my-app --trace
-
-# View results
-./hud --tui trace.json
+# Live profiling with real-time HUD
+sudo ./hud --pid $(pgrep my-app) --target ./my-app
 ```
 
 ## What You'll See
 
-**Glass Cockpit TUI** - Instant insights:
+**Live Glass Cockpit** - Real-time F-35 style HUD updating as your code runs:
 - 🎯 **Master Status** - CAUTION/NORMAL health at a glance
-- 🔥 **Top Issues** - Hottest functions with CPU % and source location
-- 📊 **Worker Bars** - Load distribution across threads
-- ⏱️  **Timeline** - Execution flow over time
-
-**Chrome Timeline** - Deep dive temporal analysis:
-- When did things happen?
-- What was running simultaneously?
-- Worker utilization patterns over time
+- 🔥 **Top Hotspots** - Functions consuming CPU with file:line locations
+- 📊 **Worker Load** - Distribution across runtime threads
+- ⏱️  **Timeline** - Execution flow as events arrive
+- 🔴 **● LIVE** indicator - Streaming profiling data in real-time
 
 ## Quick Start
 
@@ -32,33 +25,39 @@ sudo ./hud --pid $(pgrep my-app) --target ./my-app --trace
 cargo xtask build-ebpf --release
 cargo build --release
 
-# 2. Run test app
+# 2. Run your app (or use test app)
 cargo build --release --example test-async-app
 ./target/release/examples/test-async-app &
 
-# 3. Profile it (30 seconds)
+# 3. Attach profiler - live HUD appears immediately
 sudo -E ./target/release/hud \
   --pid $! \
-  --target ./target/release/examples/test-async-app \
-  --trace
+  --target ./target/release/examples/test-async-app
 
-# 4. View in TUI
-./target/release/hud --tui trace.json
-
-# Or view in Chrome
-google-chrome chrome://tracing  # Load trace.json
+# Press Q to quit
 ```
 
-**One-liner test:**
+**Modes:**
+
 ```bash
-./test.sh  # Builds, profiles, generates trace.json
+# Live HUD (default)
+hud --pid <PID> --target <BINARY>
+
+# Live HUD + export for later replay
+hud --pid <PID> --target <BINARY> --export trace.json
+
+# Replay previously captured session
+hud --replay trace.json
+
+# Headless data collection (no TUI)
+hud --pid <PID> --target <BINARY> --export trace.json --headless
 ```
 
 ## How It Works
 
 Uses eBPF to capture:
 - **Scheduler events** - When workers start/stop (sched_switch)
-- **CPU samples** - What's actually running (perf_event @ 99Hz)
+- **CPU samples** - What's running right now (perf_event @ 99Hz)
 - **Stack traces** - With DWARF symbols for file:line locations
 
 Zero overhead, attach to any running process, no code changes needed.
@@ -79,27 +78,25 @@ Without this, you'll see timings but not function names.
 ## CLI Reference
 
 ```bash
-# Profile and generate trace
-hud --pid <PID> --target <BINARY> --trace [--duration 30]
-
-# View trace in TUI
-hud --tui trace.json
+# Live profiling with TUI
+hud --pid <PID> --target <BINARY>
 
 # Options
   --pid <PID>              Process to profile
   --target <PATH>          Binary path (for symbol resolution)
-  --trace                  Generate trace.json
-  --duration <SECS>        How long to profile (default: 30)
-  --trace-output <FILE>    Output file (default: trace.json)
+  --export <FILE>          Also save to file for replay
+  --replay <FILE>          Load and view previously captured session
+  --duration <SECS>        Auto-stop after N seconds (0 = unlimited)
+  --headless               Profile without TUI (requires --export)
 ```
 
 ## Use Cases
 
-**"What's slow?"** - TUI shows hot functions instantly
-**"When did it get slow?"** - Timeline shows exact moments
-**"Are workers balanced?"** - Worker bars show distribution
-**"What's blocking?"** - See all workers idle except one
-**"How does this code work?"** - Visual execution flow
+**"What's slow?"** - Hotspots update in real-time
+**"When did it get slow?"** - Timeline shows moments as they happen
+**"Are workers balanced?"** - Worker bars show live distribution
+**"What's blocking?"** - See idle workers immediately
+**"How does this work?"** - Watch execution flow live
 
 ## Installation
 
@@ -146,8 +143,8 @@ cargo install bpf-linker --features llvm-21
 
 ## Project Status
 
-✅ **Production Ready** - Core profiling and visualization complete
-🎯 **Active Development** - Enhanced TUI features in progress
+✅ **Production Ready** - Live profiling with real-time TUI
+🎯 **Active Development** - Enhanced interactive features
 
 See [ROADMAP.md](docs/ROADMAP.md) for planned features.
 
@@ -155,11 +152,11 @@ See [ROADMAP.md](docs/ROADMAP.md) for planned features.
 
 | Flamegraph | hud |
 |------------|-----|
-| What is slow? | What is slow + When + Why |
-| Aggregated averages | Temporal patterns |
+| What is slow? | What is slow + When + Live |
+| Aggregated averages | Real-time patterns |
 | No source locations | file:line in TUI |
 | Overall stats | Worker-level insights |
-| Static view | Timeline + Live TUI |
+| Static view | Live updating HUD |
 
 **You need both** - flamegraph for structure, hud for behavior.
 
@@ -171,7 +168,7 @@ MIT or Apache-2.0 (dual licensed)
 
 [Aya](https://aya-rs.dev/) • [ratatui](https://ratatui.rs/) • [addr2line](https://github.com/gimli-rs/addr2line)
 
-Inspired by F-35 glass cockpits, Chrome DevTools, and Brendan Gregg's performance tools.
+Inspired by F-35 glass cockpits and Brendan Gregg's performance tools.
 
 ---
 

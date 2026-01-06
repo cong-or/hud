@@ -5,28 +5,27 @@ use std::path::PathBuf;
 
 #[derive(Parser)]
 pub struct Args {
-    #[arg(short, long, help = "Process ID to attach to")]
+    /// Process ID to attach to (for live profiling)
+    #[arg(short, long)]
     pub pid: Option<i32>,
 
-    #[arg(
-        short,
-        long,
-        help = "Path to target binary (defaults to test-async-app)"
-    )]
+    /// Path to target binary for symbol resolution
+    #[arg(short, long)]
     pub target: Option<String>,
 
-    #[arg(long, help = "Enable Chrome trace export")]
-    pub trace: bool,
+    /// Replay mode: view a previously captured trace file
+    #[arg(long, value_name = "TRACE_FILE", conflicts_with_all = &["pid", "target", "export"])]
+    pub replay: Option<PathBuf>,
 
-    #[arg(long, default_value = "30", help = "Duration to profile in seconds (when using --trace)")]
+    /// Export trace data to file while profiling
+    #[arg(long, value_name = "FILE", requires = "pid")]
+    pub export: Option<PathBuf>,
+
+    /// Duration to profile in seconds (0 = unlimited)
+    #[arg(long, default_value = "0")]
     pub duration: u64,
 
-    #[arg(long, default_value = "trace.json", help = "Output path for trace JSON")]
-    pub trace_output: PathBuf,
-
-    #[arg(long, help = "Trace-only mode (no live event output)")]
-    pub no_live: bool,
-
-    #[arg(long, value_name = "TRACE_FILE", help = "Launch TUI to visualize a trace.json file")]
-    pub tui: Option<PathBuf>,
+    /// Headless mode: profile without TUI (requires --export)
+    #[arg(long, requires = "export")]
+    pub headless: bool,
 }

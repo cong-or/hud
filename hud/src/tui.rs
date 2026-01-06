@@ -1,4 +1,5 @@
 use anyhow::Result;
+use crossbeam_channel::Receiver;
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
     execute,
@@ -14,6 +15,7 @@ use ratatui::{
 };
 use std::io;
 use std::path::Path;
+use std::time::Duration;
 
 mod timeline;
 pub mod hotspot;  // Public for testing
@@ -27,7 +29,7 @@ use status::StatusPanel;
 use workers::WorkersPanel;
 use theme::*;
 
-pub use crate::trace_data::{TraceData, TraceEvent};
+pub use crate::trace_data::{TraceData, TraceEvent, LiveData};
 
 /// View mode for the TUI
 #[derive(Debug, Clone, PartialEq)]
@@ -568,4 +570,151 @@ impl App {
 
         Ok(())
     }
+}
+
+/// Run TUI in live mode, receiving events from a channel
+pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> {
+    // Setup terminal
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+
+    // Live data accumulator
+    let mut live_data = LiveData::new();
+    let mut should_quit = false;
+    let mut last_update = std::time::Instant::now();
+    const UPDATE_INTERVAL: Duration = Duration::from_millis(100); // Redraw every 100ms
+
+    // Main loop
+    loop {
+        // Process incoming events (non-blocking)
+        while let Ok(event) = event_rx.try_recv() {
+            live_data.add_event(event);
+        }
+
+        // Convert to TraceData for rendering
+        let trace_data = live_data.as_trace_data();
+
+        // Only redraw if we have data and enough time has passed
+        if !trace_data.events.is_empty() && last_update.elapsed() >= UPDATE_INTERVAL {
+            // Rebuild panels with latest data
+            let status_panel = StatusPanel::new(&trace_data);
+            let hotspot_view = HotspotView::new(&trace_data);
+            let workers_panel = WorkersPanel::new(&trace_data);
+            let timeline_view = TimelineView::new(&trace_data);
+
+            terminal.draw(|f| {
+                let outer_layout = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([
+                        Constraint::Length(3), // Header
+                        Constraint::Min(0),    // Main glass cockpit panels
+                        Constraint::Length(3), // Status bar
+                    ])
+                    .split(f.area());
+
+                // Header with live indicator
+                let pid_display = pid.map(|p| p.to_string()).unwrap_or_else(|| "unknown".to_string());
+                let header = Paragraph::new(vec![
+                    Line::from(vec![
+                        Span::styled("hud", Style::default().fg(HUD_GREEN).add_modifier(Modifier::BOLD)),
+                        Span::styled(" v0.1.0", Style::default().fg(INFO_DIM)),
+                        Span::raw("    PID: "),
+                        Span::styled(pid_display, Style::default().fg(HUD_GREEN)),
+                        Span::raw("    Duration: "),
+                        Span::styled(format!("{:.1}s", trace_data.duration), Style::default().fg(HUD_GREEN)),
+                        Span::raw("    Events: "),
+                        Span::styled(format!("{}", trace_data.events.len()), Style::default().fg(CAUTION_AMBER)),
+                        Span::raw("    "),
+                        Span::styled("● LIVE", Style::default().fg(CRITICAL_RED).add_modifier(Modifier::BOLD)),
+                    ]),
+                ])
+                .block(Block::default().borders(Borders::ALL));
+                f.render_widget(header, outer_layout[0]);
+
+                // Main content area - Glass Cockpit layout
+                let main_area = outer_layout[1];
+
+                // Split into top and bottom rows
+                let rows = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([
+                        Constraint::Percentage(50), // Top row
+                        Constraint::Percentage(50), // Bottom row
+                    ])
+                    .split(main_area);
+
+                // Top row: Status (left) | Hotspots (right)
+                let top_cols = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints([
+                        Constraint::Percentage(30), // Status panel
+                        Constraint::Percentage(70), // Hotspots panel
+                    ])
+                    .split(rows[0]);
+
+                // Bottom row: Workers (left) | Timeline (right)
+                let bottom_cols = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints([
+                        Constraint::Percentage(30), // Workers panel
+                        Constraint::Percentage(70), // Timeline panel
+                    ])
+                    .split(rows[1]);
+
+                // Render all four panels
+                status_panel.render(f, top_cols[0], &trace_data);
+                hotspot_view.render(f, top_cols[1], &trace_data);
+                workers_panel.render(f, bottom_cols[0], &trace_data);
+                timeline_view.render(f, bottom_cols[1], &trace_data);
+
+                // Status bar
+                let status_line = Line::from(vec![
+                    Span::styled("[Q]", Style::default().fg(CAUTION_AMBER)),
+                    Span::raw(" Quit    "),
+                    Span::styled("Mode: LIVE PROFILING", Style::default().fg(CRITICAL_RED).add_modifier(Modifier::BOLD)),
+                ]);
+
+                let status = Paragraph::new(vec![status_line])
+                    .block(Block::default().borders(Borders::ALL));
+                f.render_widget(status, outer_layout[2]);
+            })?;
+
+            last_update = std::time::Instant::now();
+        }
+
+        // Handle keyboard input (non-blocking)
+        if event::poll(Duration::from_millis(50))? {
+            if let Event::Key(key) = event::read()? {
+                if key.kind == KeyEventKind::Press {
+                    match key.code {
+                        KeyCode::Char('q') | KeyCode::Char('Q') => {
+                            should_quit = true;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        if should_quit {
+            break;
+        }
+
+        // Small sleep to avoid busy loop
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    // Cleanup terminal
+    disable_raw_mode()?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
+    terminal.show_cursor()?;
+
+    Ok(())
 }

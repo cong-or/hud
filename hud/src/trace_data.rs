@@ -1,9 +1,10 @@
 //! Trace data models for TUI display
 //!
-//! This module contains the data structures for parsed Chrome trace files
+//! This module contains the data structures for both live and replay modes
 
 use anyhow::Result;
 use std::path::Path;
+use std::collections::HashSet;
 
 /// Represents a single trace event
 #[derive(Debug, Clone)]
@@ -18,12 +19,70 @@ pub struct TraceEvent {
     pub line: Option<u32>,
 }
 
-/// Internal data model for profiler trace
+/// Internal data model for profiler trace (immutable, loaded from file)
 #[derive(Debug)]
 pub struct TraceData {
     pub events: Vec<TraceEvent>,
     pub workers: Vec<u32>,
     pub duration: f64,
+}
+
+/// Live data model that grows as events arrive
+#[derive(Debug)]
+pub struct LiveData {
+    pub events: Vec<TraceEvent>,
+    workers_set: HashSet<u32>,
+    pub workers: Vec<u32>,
+    pub duration: f64,
+    start_time: Option<f64>,
+}
+
+impl LiveData {
+    /// Create a new empty live data set
+    pub fn new() -> Self {
+        Self {
+            events: Vec::new(),
+            workers_set: HashSet::new(),
+            workers: Vec::new(),
+            duration: 0.0,
+            start_time: None,
+        }
+    }
+
+    /// Add a new event to the live data
+    pub fn add_event(&mut self, event: TraceEvent) {
+        // Set start time from first event
+        if self.start_time.is_none() {
+            self.start_time = Some(event.timestamp);
+        }
+
+        // Track workers
+        if self.workers_set.insert(event.worker_id) {
+            self.workers.push(event.worker_id);
+            self.workers.sort();
+        }
+
+        // Update duration
+        if let Some(start) = self.start_time {
+            self.duration = event.timestamp - start;
+        }
+
+        self.events.push(event);
+    }
+
+    /// Get event count
+    pub fn event_count(&self) -> usize {
+        self.events.len()
+    }
+
+    /// Convert to TraceData for compatibility with existing TUI code
+    pub fn as_trace_data(&self) -> TraceData {
+        TraceData {
+            events: self.events.clone(),
+            workers: self.workers.clone(),
+            duration: self.duration,
+        }
+    }
 }
 
 impl TraceData {
