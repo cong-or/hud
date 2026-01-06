@@ -7,7 +7,7 @@ use ratatui::{
 };
 use std::collections::HashMap;
 
-use super::{CAUTION_AMBER, CRITICAL_RED, HUD_GREEN, INFO_DIM};
+use super::{severity_marker, CAUTION_AMBER, INFO_DIM};
 use crate::analysis::{analyze_hotspots, FunctionHotspot};
 use crate::trace_data::TraceData;
 
@@ -157,13 +157,7 @@ impl HotspotView {
             let is_selected = absolute_idx == self.selected_index;
 
             // Color based on severity
-            let (marker, severity_color) = if hotspot.percentage > 40.0 {
-                ("🔴", CRITICAL_RED)
-            } else if hotspot.percentage > 20.0 {
-                ("🟡", CAUTION_AMBER)
-            } else {
-                ("🟢", HUD_GREEN)
-            };
+            let (marker, severity_color) = severity_marker(hotspot.percentage);
 
             // Function name (with special handling for system events)
             let max_name_len = 40;

@@ -1,5 +1,10 @@
 // Main function is intentionally long for clarity; time conversions lose precision for display
-#![allow(clippy::too_many_lines, clippy::cast_precision_loss, clippy::cast_lossless)]
+#![allow(
+    clippy::too_many_lines,
+    clippy::cast_precision_loss,
+    clippy::cast_lossless,
+    clippy::items_after_statements
+)]
 
 use anyhow::{Context, Result};
 use aya::maps::{RingBuf, StackTraceMap};
@@ -141,8 +146,12 @@ async fn main() -> Result<()> {
     )?;
 
     // Track blocking durations and stack IDs (for marker detection)
-    let mut blocking_start_time: Option<u64> = None;
-    let mut blocking_start_stack_id: Option<i64> = None;
+    #[derive(Debug, Clone, Copy)]
+    struct BlockingState {
+        start_time_ns: u64,
+        stack_id: i64,
+    }
+    let mut blocking_state: Option<BlockingState> = None;
     let mut event_count = 0;
     let mut last_status_time = Instant::now();
 
@@ -192,29 +201,30 @@ async fn main() -> Result<()> {
 
             match event.event_type {
                 EVENT_BLOCKING_START => {
-                    blocking_start_time = Some(event.timestamp_ns);
-                    blocking_start_stack_id = Some(event.stack_id);
+                    blocking_state = Some(BlockingState {
+                        start_time_ns: event.timestamp_ns,
+                        stack_id: event.stack_id,
+                    });
 
                     if args.headless {
                         display_blocking_start(&event);
                     }
                 }
                 EVENT_BLOCKING_END => {
-                    if let Some(start_time) = blocking_start_time {
+                    if let Some(state) = blocking_state {
                         stats.marker_detected += 1;
 
                         if args.headless {
                             display_blocking_end(
                                 &event,
-                                start_time,
-                                blocking_start_stack_id,
+                                state.start_time_ns,
+                                Some(state.stack_id),
                                 &stack_resolver,
                                 &stack_traces,
                             );
                         }
 
-                        blocking_start_time = None;
-                        blocking_start_stack_id = None;
+                        blocking_state = None;
                     } else if args.headless {
                         display_blocking_end_no_start(&event);
                     }

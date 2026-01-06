@@ -144,13 +144,13 @@ impl TraceEventExporter {
         match event.event_type {
             TRACE_EXECUTION_START => {
                 // Resolve function name and source location from stack trace
-                let (function_name, file, line) = if event.stack_id < 0 {
+                let (function_name, file, line) = match (event.stack_id < 0, top_frame_addr) {
                     // Stack capture failed (from sched_switch which can't capture user stacks)
-                    ("execution".to_string(), None, None)
-                } else if let Some(addr) = top_frame_addr {
-                    self.resolve_symbol(event.stack_id, addr)
-                } else {
-                    (format!("trace_{}", event.stack_id), None, None)
+                    (true, _) => ("execution".to_string(), None, None),
+                    // Valid stack ID with frame address - resolve symbol
+                    (false, Some(addr)) => self.resolve_symbol(event.stack_id, addr),
+                    // Valid stack ID but no frame address
+                    (false, None) => (format!("trace_{}", event.stack_id), None, None),
                 };
 
                 // Create metadata args

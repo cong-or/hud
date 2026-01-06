@@ -34,7 +34,7 @@ mod workers;
 
 use hotspot::HotspotView;
 use status::StatusPanel;
-use theme::{BACKGROUND, CAUTION_AMBER, CRITICAL_RED, HUD_GREEN, INFO_DIM};
+use theme::{severity_marker, BACKGROUND, CAUTION_AMBER, CRITICAL_RED, HUD_GREEN, INFO_DIM};
 use timeline::TimelineView;
 use workers::WorkersPanel;
 
