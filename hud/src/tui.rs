@@ -1,3 +1,13 @@
+// TUI rendering intentionally uses precision-losing casts and long functions for clarity
+#![allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::too_many_lines,
+    clippy::items_after_statements,
+    clippy::needless_pass_by_value
+)]
+
 use anyhow::Result;
 use crossbeam_channel::Receiver;
 use crossterm::{
@@ -8,28 +18,27 @@ use crossterm::{
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
     Terminal,
 };
 use std::io;
-use std::path::Path;
 use std::time::Duration;
 
-mod timeline;
-pub mod hotspot;  // Public for testing
+pub mod hotspot; // Public for testing
 mod status;
-mod workers;
 mod theme;
+mod timeline;
+mod workers;
 
-use timeline::TimelineView;
 use hotspot::HotspotView;
 use status::StatusPanel;
+use theme::{CAUTION_AMBER, CRITICAL_RED, HUD_GREEN, INFO_DIM, BACKGROUND};
+use timeline::TimelineView;
 use workers::WorkersPanel;
-use theme::*;
 
-pub use crate::trace_data::{TraceData, TraceEvent, LiveData};
+pub use crate::trace_data::{LiveData, TraceData, TraceEvent};
 
 /// View mode for the TUI
 #[derive(Debug, Clone, PartialEq)]
@@ -55,7 +64,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(data: TraceData) -> Self {
+    #[must_use] pub fn new(data: TraceData) -> Self {
         let status_panel = StatusPanel::new(&data);
         let hotspot_view = HotspotView::new(&data);
         let workers_panel = WorkersPanel::new(&data);
@@ -82,7 +91,7 @@ impl App {
         match &self.view_mode {
             ViewMode::Analysis => {
                 match key {
-                    KeyCode::Char('q') | KeyCode::Char('Q') => self.should_quit = true,
+                    KeyCode::Char('q' | 'Q') => self.should_quit = true,
                     KeyCode::Up => self.hotspot_view.scroll_up(),
                     KeyCode::Down => self.hotspot_view.scroll_down(),
                     KeyCode::Enter => {
@@ -92,59 +101,55 @@ impl App {
                         self.search_query.clear();
                         self.view_mode = ViewMode::Search;
                     }
-                    KeyCode::Char('f') | KeyCode::Char('F') => {
+                    KeyCode::Char('f' | 'F') => {
                         self.view_mode = ViewMode::WorkerFilter;
                     }
-                    KeyCode::Char('c') | KeyCode::Char('C') => {
+                    KeyCode::Char('c' | 'C') => {
                         self.search_query.clear();
                         self.hotspot_view.clear_filter();
                         // Reset to all workers
                         self.selected_workers = self.data.workers.clone();
                         self.hotspot_view.filter_by_workers(&self.selected_workers, &self.data);
                     }
-                    KeyCode::Char('w') | KeyCode::Char('W') => {
+                    KeyCode::Char('w' | 'W') => {
                         self.timeline_view.zoom_in();
                     }
-                    KeyCode::Char('s') | KeyCode::Char('S') => {
+                    KeyCode::Char('s' | 'S') => {
                         self.timeline_view.zoom_out();
                     }
-                    KeyCode::Char('a') | KeyCode::Char('A') => {
+                    KeyCode::Char('a' | 'A') => {
                         self.timeline_view.pan_left();
                     }
-                    KeyCode::Char('d') | KeyCode::Char('D') => {
+                    KeyCode::Char('d' | 'D') => {
                         self.timeline_view.pan_right();
                     }
                     _ => {}
                 }
             }
-            ViewMode::DrillDown => {
-                match key {
-                    KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
-                        self.view_mode = ViewMode::Analysis;
-                    }
-                    _ => {}
+            ViewMode::DrillDown => match key {
+                KeyCode::Esc | KeyCode::Char('q' | 'Q') => {
+                    self.view_mode = ViewMode::Analysis;
                 }
-            }
-            ViewMode::Search => {
-                match key {
-                    KeyCode::Esc => {
-                        self.search_query.clear();
-                        self.view_mode = ViewMode::Analysis;
-                        self.hotspot_view.clear_filter();
-                    }
-                    KeyCode::Enter => {
-                        self.view_mode = ViewMode::Analysis;
-                        self.hotspot_view.apply_filter(&self.search_query);
-                    }
-                    KeyCode::Backspace => {
-                        self.search_query.pop();
-                    }
-                    KeyCode::Char(c) => {
-                        self.search_query.push(c);
-                    }
-                    _ => {}
+                _ => {}
+            },
+            ViewMode::Search => match key {
+                KeyCode::Esc => {
+                    self.search_query.clear();
+                    self.view_mode = ViewMode::Analysis;
+                    self.hotspot_view.clear_filter();
                 }
-            }
+                KeyCode::Enter => {
+                    self.view_mode = ViewMode::Analysis;
+                    self.hotspot_view.apply_filter(&self.search_query);
+                }
+                KeyCode::Backspace => {
+                    self.search_query.pop();
+                }
+                KeyCode::Char(c) => {
+                    self.search_query.push(c);
+                }
+                _ => {}
+            },
             ViewMode::WorkerFilter => {
                 match key {
                     KeyCode::Esc => {
@@ -161,18 +166,20 @@ impl App {
                     KeyCode::Char(' ') => {
                         // Toggle worker selection
                         let worker_id = self.data.workers[self.worker_filter_cursor];
-                        if let Some(pos) = self.selected_workers.iter().position(|&w| w == worker_id) {
+                        if let Some(pos) =
+                            self.selected_workers.iter().position(|&w| w == worker_id)
+                        {
                             self.selected_workers.remove(pos);
                         } else {
                             self.selected_workers.push(worker_id);
-                            self.selected_workers.sort();
+                            self.selected_workers.sort_unstable();
                         }
                     }
-                    KeyCode::Char('a') | KeyCode::Char('A') => {
+                    KeyCode::Char('a' | 'A') => {
                         // Select all workers
                         self.selected_workers = self.data.workers.clone();
                     }
-                    KeyCode::Char('n') | KeyCode::Char('N') => {
+                    KeyCode::Char('n' | 'N') => {
                         // Select none
                         self.selected_workers.clear();
                     }
@@ -216,9 +223,10 @@ impl App {
 
         let mut lines = vec![
             Line::from(""),
-            Line::from(vec![
-                Span::styled("Select Workers to Filter", Style::default().fg(HUD_GREEN).add_modifier(Modifier::BOLD)),
-            ]),
+            Line::from(vec![Span::styled(
+                "Select Workers to Filter",
+                Style::default().fg(HUD_GREEN).add_modifier(Modifier::BOLD),
+            )]),
             Line::from("─".repeat(popup_area.width.saturating_sub(4) as usize)),
             Line::from(""),
         ];
@@ -241,7 +249,7 @@ impl App {
 
             lines.push(Line::from(vec![
                 Span::raw(cursor),
-                Span::styled(format!("{}Worker {}", checkbox, worker_id), style),
+                Span::styled(format!("{checkbox}Worker {worker_id}"), style),
             ]));
         }
 
@@ -258,13 +266,12 @@ impl App {
             Span::raw(" Apply"),
         ]));
 
-        let widget = Paragraph::new(lines)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(format!("Worker Filter ({} selected)", self.selected_workers.len()))
-                    .style(Style::default().bg(BACKGROUND).fg(HUD_GREEN))
-            );
+        let widget = Paragraph::new(lines).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(format!("Worker Filter ({} selected)", self.selected_workers.len()))
+                .style(Style::default().bg(BACKGROUND).fg(HUD_GREEN)),
+        );
 
         f.render_widget(widget, popup_area);
     }
@@ -298,7 +305,7 @@ impl App {
                 Block::default()
                     .borders(Borders::ALL)
                     .title("Filter Functions")
-                    .style(Style::default().bg(BACKGROUND).fg(HUD_GREEN))
+                    .style(Style::default().bg(BACKGROUND).fg(HUD_GREEN)),
             )
             .style(Style::default().fg(CAUTION_AMBER));
 
@@ -310,24 +317,40 @@ impl App {
         if let Some(hotspot) = self.hotspot_view.get_selected() {
             let mut lines = vec![
                 Line::from(""),
-                Line::from(vec![
-                    Span::styled("FUNCTION DETAILS", Style::default().fg(HUD_GREEN).add_modifier(Modifier::BOLD)),
-                ]),
+                Line::from(vec![Span::styled(
+                    "FUNCTION DETAILS",
+                    Style::default().fg(HUD_GREEN).add_modifier(Modifier::BOLD),
+                )]),
                 Line::from("─".repeat(area.width as usize - 4)),
                 Line::from(""),
             ];
 
             // Function name (full, not truncated)
             lines.push(Line::from(vec![
-                Span::styled("Name: ", Style::default().fg(CAUTION_AMBER).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "Name: ",
+                    Style::default().fg(CAUTION_AMBER).add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(&hotspot.name, Style::default().fg(HUD_GREEN)),
             ]));
             lines.push(Line::from(""));
 
             // CPU usage
             lines.push(Line::from(vec![
-                Span::styled("CPU Usage: ", Style::default().fg(CAUTION_AMBER).add_modifier(Modifier::BOLD)),
-                Span::styled(format!("{:.1}%", hotspot.percentage), Style::default().fg(if hotspot.percentage > 40.0 { CRITICAL_RED } else if hotspot.percentage > 20.0 { CAUTION_AMBER } else { HUD_GREEN })),
+                Span::styled(
+                    "CPU Usage: ",
+                    Style::default().fg(CAUTION_AMBER).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("{:.1}%", hotspot.percentage),
+                    Style::default().fg(if hotspot.percentage > 40.0 {
+                        CRITICAL_RED
+                    } else if hotspot.percentage > 20.0 {
+                        CAUTION_AMBER
+                    } else {
+                        HUD_GREEN
+                    }),
+                ),
                 Span::raw(format!(" ({} samples)", hotspot.count)),
             ]));
             lines.push(Line::from(""));
@@ -335,7 +358,10 @@ impl App {
             // Source location
             if let Some(ref file) = hotspot.file {
                 lines.push(Line::from(vec![
-                    Span::styled("Location: ", Style::default().fg(CAUTION_AMBER).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "Location: ",
+                        Style::default().fg(CAUTION_AMBER).add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled(
                         format!("{}:{}", file, hotspot.line.unwrap_or(0)),
                         Style::default().fg(INFO_DIM),
@@ -343,16 +369,20 @@ impl App {
                 ]));
             } else {
                 lines.push(Line::from(vec![
-                    Span::styled("Location: ", Style::default().fg(CAUTION_AMBER).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "Location: ",
+                        Style::default().fg(CAUTION_AMBER).add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled("(no debug symbols)", Style::default().fg(INFO_DIM)),
                 ]));
             }
             lines.push(Line::from(""));
 
             // Worker breakdown
-            lines.push(Line::from(vec![
-                Span::styled("Worker Distribution:", Style::default().fg(CAUTION_AMBER).add_modifier(Modifier::BOLD)),
-            ]));
+            lines.push(Line::from(vec![Span::styled(
+                "Worker Distribution:",
+                Style::default().fg(CAUTION_AMBER).add_modifier(Modifier::BOLD),
+            )]));
             lines.push(Line::from(""));
 
             let mut worker_list: Vec<_> = hotspot.workers.iter().collect();
@@ -366,9 +396,9 @@ impl App {
                 let bar = format!("{}{}", "▓".repeat(filled), "░".repeat(empty));
 
                 lines.push(Line::from(vec![
-                    Span::raw(format!("  Worker {:2}: ", worker_id)),
+                    Span::raw(format!("  Worker {worker_id:2}: ")),
                     Span::styled(bar, Style::default().fg(HUD_GREEN)),
-                    Span::raw(format!(" {:.0}% ({} samples)", percentage, count)),
+                    Span::raw(format!(" {percentage:.0}% ({count} samples)")),
                 ]));
             }
 
@@ -379,17 +409,21 @@ impl App {
                 Span::raw(" Back to Analysis"),
             ]));
 
-            let paragraph = Paragraph::new(lines)
-                .block(Block::default()
+            let paragraph = Paragraph::new(lines).block(
+                Block::default()
                     .borders(Borders::ALL)
                     .title("Function Detail View")
-                    .style(Style::default().bg(BACKGROUND)));
+                    .style(Style::default().bg(BACKGROUND)),
+            );
 
             f.render_widget(paragraph, area);
         }
     }
 
     /// Run the TUI event loop
+    ///
+    /// # Errors
+    /// Returns an error if terminal setup or rendering fails
     pub fn run(mut self) -> Result<()> {
         // Setup terminal
         enable_raw_mode()?;
@@ -412,16 +446,20 @@ impl App {
                     .split(f.area());
 
                 // Header
-                let header = Paragraph::new(vec![
-                    Line::from(vec![
-                        Span::styled("hud", Style::default().fg(HUD_GREEN).add_modifier(Modifier::BOLD)),
-                        Span::styled(" v0.1.0", Style::default().fg(INFO_DIM)),
-                        Span::raw("    PID: "),
-                        Span::styled("trace.json", Style::default().fg(INFO_DIM)),
-                        Span::raw("    Duration: "),
-                        Span::styled(format!("{:.1}s", self.data.duration), Style::default().fg(HUD_GREEN)),
-                    ]),
-                ])
+                let header = Paragraph::new(vec![Line::from(vec![
+                    Span::styled(
+                        "hud",
+                        Style::default().fg(HUD_GREEN).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(" v0.1.0", Style::default().fg(INFO_DIM)),
+                    Span::raw("    PID: "),
+                    Span::styled("trace.json", Style::default().fg(INFO_DIM)),
+                    Span::raw("    Duration: "),
+                    Span::styled(
+                        format!("{:.1}s", self.data.duration),
+                        Style::default().fg(HUD_GREEN),
+                    ),
+                ])])
                 .block(Block::default().borders(Borders::ALL));
                 f.render_widget(header, outer_layout[0]);
 
@@ -502,7 +540,8 @@ impl App {
                         if self.hotspot_view.is_filtered() {
                             spans.push(Span::styled("[C]", Style::default().fg(CAUTION_AMBER)));
                             spans.push(Span::raw(" Clear    "));
-                            spans.push(Span::styled("FILTERED", Style::default().fg(CAUTION_AMBER)));
+                            spans
+                                .push(Span::styled("FILTERED", Style::default().fg(CAUTION_AMBER)));
                         } else {
                             spans.push(Span::styled("ANALYSIS", Style::default().fg(HUD_GREEN)));
                         }
@@ -540,8 +579,8 @@ impl App {
                     ]),
                 };
 
-                let status = Paragraph::new(vec![status_line])
-                    .block(Block::default().borders(Borders::ALL));
+                let status =
+                    Paragraph::new(vec![status_line]).block(Block::default().borders(Borders::ALL));
                 f.render_widget(status, outer_layout[2]);
             })?;
 
@@ -561,11 +600,7 @@ impl App {
 
         // Cleanup terminal
         disable_raw_mode()?;
-        execute!(
-            terminal.backend_mut(),
-            LeaveAlternateScreen,
-            DisableMouseCapture
-        )?;
+        execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
         terminal.show_cursor()?;
 
         Ok(())
@@ -573,6 +608,9 @@ impl App {
 }
 
 /// Run TUI in live mode, receiving events from a channel
+///
+/// # Errors
+/// Returns an error if terminal setup or rendering fails
 pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> {
     // Setup terminal
     enable_raw_mode()?;
@@ -616,21 +654,32 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
                     .split(f.area());
 
                 // Header with live indicator
-                let pid_display = pid.map(|p| p.to_string()).unwrap_or_else(|| "unknown".to_string());
-                let header = Paragraph::new(vec![
-                    Line::from(vec![
-                        Span::styled("hud", Style::default().fg(HUD_GREEN).add_modifier(Modifier::BOLD)),
-                        Span::styled(" v0.1.0", Style::default().fg(INFO_DIM)),
-                        Span::raw("    PID: "),
-                        Span::styled(pid_display, Style::default().fg(HUD_GREEN)),
-                        Span::raw("    Duration: "),
-                        Span::styled(format!("{:.1}s", trace_data.duration), Style::default().fg(HUD_GREEN)),
-                        Span::raw("    Events: "),
-                        Span::styled(format!("{}", trace_data.events.len()), Style::default().fg(CAUTION_AMBER)),
-                        Span::raw("    "),
-                        Span::styled("● LIVE", Style::default().fg(CRITICAL_RED).add_modifier(Modifier::BOLD)),
-                    ]),
-                ])
+                let pid_display =
+                    pid.map_or_else(|| "unknown".to_string(), |p| p.to_string());
+                let header = Paragraph::new(vec![Line::from(vec![
+                    Span::styled(
+                        "hud",
+                        Style::default().fg(HUD_GREEN).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(" v0.1.0", Style::default().fg(INFO_DIM)),
+                    Span::raw("    PID: "),
+                    Span::styled(pid_display, Style::default().fg(HUD_GREEN)),
+                    Span::raw("    Duration: "),
+                    Span::styled(
+                        format!("{:.1}s", trace_data.duration),
+                        Style::default().fg(HUD_GREEN),
+                    ),
+                    Span::raw("    Events: "),
+                    Span::styled(
+                        format!("{}", trace_data.events.len()),
+                        Style::default().fg(CAUTION_AMBER),
+                    ),
+                    Span::raw("    "),
+                    Span::styled(
+                        "● LIVE",
+                        Style::default().fg(CRITICAL_RED).add_modifier(Modifier::BOLD),
+                    ),
+                ])])
                 .block(Block::default().borders(Borders::ALL));
                 f.render_widget(header, outer_layout[0]);
 
@@ -674,11 +723,14 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
                 let status_line = Line::from(vec![
                     Span::styled("[Q]", Style::default().fg(CAUTION_AMBER)),
                     Span::raw(" Quit    "),
-                    Span::styled("Mode: LIVE PROFILING", Style::default().fg(CRITICAL_RED).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "Mode: LIVE PROFILING",
+                        Style::default().fg(CRITICAL_RED).add_modifier(Modifier::BOLD),
+                    ),
                 ]);
 
-                let status = Paragraph::new(vec![status_line])
-                    .block(Block::default().borders(Borders::ALL));
+                let status =
+                    Paragraph::new(vec![status_line]).block(Block::default().borders(Borders::ALL));
                 f.render_widget(status, outer_layout[2]);
             })?;
 
@@ -689,11 +741,8 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
         if event::poll(Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
-                    match key.code {
-                        KeyCode::Char('q') | KeyCode::Char('Q') => {
-                            should_quit = true;
-                        }
-                        _ => {}
+                    if let KeyCode::Char('q' | 'Q') = key.code {
+                        should_quit = true;
                     }
                 }
             }
@@ -709,11 +758,7 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
 
     // Cleanup terminal
     disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
     terminal.show_cursor()?;
 
     Ok(())

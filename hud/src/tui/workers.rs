@@ -1,6 +1,6 @@
 use ratatui::{
     layout::Rect,
-    style::{Color, Style},
+    style::Style,
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
     Frame,
@@ -25,10 +25,9 @@ impl WorkersPanel {
         let mut worker_stats: HashMap<u32, WorkerStats> = HashMap::new();
 
         for event in &data.events {
-            let stats = worker_stats.entry(event.worker_id).or_insert(WorkerStats {
-                total_samples: 0,
-                samples_with_functions: 0,
-            });
+            let stats = worker_stats
+                .entry(event.worker_id)
+                .or_insert(WorkerStats { total_samples: 0, samples_with_functions: 0 });
 
             stats.total_samples += 1;
             if event.name != "execution" {
@@ -59,27 +58,20 @@ impl WorkersPanel {
                 let empty = bar_width - filled;
                 let bar = format!("{}{}", "█".repeat(filled), "░".repeat(empty));
 
-                let bar_color = if percentage > 50.0 {
-                    CAUTION_AMBER
-                } else {
-                    HUD_GREEN
-                };
+                let bar_color = if percentage > 50.0 { CAUTION_AMBER } else { HUD_GREEN };
 
                 let marker = if percentage > 50.0 { " ⚠️" } else { "" };
 
                 lines.push(Line::from(vec![
-                    Span::raw(format!(" W{:<3} ", worker_id)),
+                    Span::raw(format!(" W{worker_id:<3} ")),
                     Span::styled(bar, Style::default().fg(bar_color)),
-                    Span::raw(format!(" {:.0}%{}", percentage, marker)),
+                    Span::raw(format!(" {percentage:.0}%{marker}")),
                 ]));
             }
         }
 
-        let paragraph = Paragraph::new(lines).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("EXECUTOR THREADS"),
-        );
+        let paragraph = Paragraph::new(lines)
+            .block(Block::default().borders(Borders::ALL).title("EXECUTOR THREADS"));
 
         f.render_widget(paragraph, area);
     }

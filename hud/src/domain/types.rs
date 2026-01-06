@@ -1,7 +1,10 @@
 //! Domain types providing compile-time safety and self-documentation
 //!
 //! These newtype wrappers prevent common bugs like passing a TID where a
-//! WorkerId is expected, and make function signatures more expressive.
+//! `WorkerId` is expected, and make function signatures more expressive.
+
+// Time conversions intentionally lose precision for display purposes
+#![allow(clippy::cast_precision_loss)]
 
 use std::fmt;
 
@@ -20,9 +23,21 @@ impl fmt::Display for WorkerId {
 
 /// Process ID
 ///
-/// Represents a process ID in the system.
+/// Represents a process ID in the system. Linux PIDs are positive i32 values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Pid(pub u32);
+pub struct Pid(pub i32);
+
+impl Pid {
+    /// Create a new PID from an i32 value
+    ///
+    /// # Panics
+    /// Panics if the PID is negative
+    #[must_use]
+    pub fn new(pid: i32) -> Self {
+        assert!(pid >= 0, "PID must be non-negative");
+        Self(pid)
+    }
+}
 
 impl fmt::Display for Pid {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -30,22 +45,16 @@ impl fmt::Display for Pid {
     }
 }
 
-impl From<i32> for Pid {
-    fn from(pid: i32) -> Self {
-        Pid(pid as u32)
-    }
-}
-
 impl From<Pid> for i32 {
     fn from(pid: Pid) -> Self {
-        pid.0 as i32
+        pid.0
     }
 }
 
 /// Thread ID
 ///
 /// Represents a thread ID in the system.
-/// This is distinct from WorkerId - a thread has a TID assigned by the kernel,
+/// This is distinct from `WorkerId` - a thread has a TID assigned by the kernel,
 /// while a worker has a logical ID assigned by Tokio.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Tid(pub u32);
@@ -77,11 +86,17 @@ pub struct StackId(pub i64);
 
 impl StackId {
     /// Returns true if this stack ID is valid (non-negative)
+    #[must_use]
     pub fn is_valid(self) -> bool {
         self.0 >= 0
     }
 
-    /// Convert to u32 for eBPF map lookup (panics if invalid)
+    /// Convert to u32 for eBPF map lookup
+    ///
+    /// # Panics
+    /// Panics if the stack ID is invalid (negative)
+    #[must_use]
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
     pub fn as_map_key(self) -> u32 {
         assert!(self.is_valid(), "Cannot convert invalid StackId to map key");
         self.0 as u32
@@ -95,7 +110,10 @@ impl StackId {
 pub struct FunctionName(String);
 
 impl FunctionName {
-    /// Create a new function name (panics if empty)
+    /// Create a new function name
+    ///
+    /// # Panics
+    /// Panics if the name is empty
     pub fn new(name: impl Into<String>) -> Self {
         let name = name.into();
         assert!(!name.is_empty(), "Function name cannot be empty");
@@ -103,7 +121,7 @@ impl FunctionName {
     }
 
     /// Get the function name as a string slice
-    pub fn as_str(&self) -> &str {
+    #[must_use] pub fn as_str(&self) -> &str {
         &self.0
     }
 }
@@ -134,17 +152,17 @@ pub struct Timestamp(pub u64);
 
 impl Timestamp {
     /// Convert to seconds (f64)
-    pub fn as_seconds(self) -> f64 {
+    #[must_use] pub fn as_seconds(self) -> f64 {
         self.0 as f64 / 1_000_000_000.0
     }
 
     /// Convert to microseconds (u64)
-    pub fn as_micros(self) -> u64 {
+    #[must_use] pub fn as_micros(self) -> u64 {
         self.0 / 1_000
     }
 
     /// Convert to milliseconds (f64)
-    pub fn as_millis(self) -> f64 {
+    #[must_use] pub fn as_millis(self) -> f64 {
         self.0 as f64 / 1_000_000.0
     }
 }
@@ -163,17 +181,17 @@ pub struct Duration(pub u64);
 
 impl Duration {
     /// Convert to milliseconds (f64)
-    pub fn as_millis(self) -> f64 {
+    #[must_use] pub fn as_millis(self) -> f64 {
         self.0 as f64 / 1_000_000.0
     }
 
     /// Convert to seconds (f64)
-    pub fn as_seconds(self) -> f64 {
+    #[must_use] pub fn as_seconds(self) -> f64 {
         self.0 as f64 / 1_000_000_000.0
     }
 
     /// Convert to microseconds (u64)
-    pub fn as_micros(self) -> u64 {
+    #[must_use] pub fn as_micros(self) -> u64 {
         self.0 / 1_000
     }
 }
@@ -184,7 +202,7 @@ impl fmt::Display for Duration {
         if ms >= 1000.0 {
             write!(f, "{:.2}s", self.as_seconds())
         } else {
-            write!(f, "{:.2}ms", ms)
+            write!(f, "{ms:.2}ms")
         }
     }
 }
@@ -201,10 +219,16 @@ mod tests {
 
     #[test]
     fn test_pid_conversion() {
-        let pid = Pid::from(1234i32);
+        let pid = Pid::new(1234);
         assert_eq!(pid.0, 1234);
         let back: i32 = pid.into();
         assert_eq!(back, 1234);
+    }
+
+    #[test]
+    #[should_panic(expected = "PID must be non-negative")]
+    fn test_negative_pid_panics() {
+        Pid::new(-1);
     }
 
     #[test]
@@ -234,6 +258,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::float_cmp)]
     fn test_timestamp_conversions() {
         let ts = Timestamp(1_500_000_000); // 1.5 seconds
         assert_eq!(ts.as_seconds(), 1.5);
@@ -242,6 +267,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::float_cmp)]
     fn test_duration_conversions() {
         let dur = Duration(5_000_000); // 5 milliseconds
         assert_eq!(dur.as_millis(), 5.0);

@@ -16,8 +16,7 @@ fn test_export_creates_valid_json() {
 
     // Verify the output is valid JSON
     let json_str = String::from_utf8(buffer).expect("Invalid UTF-8");
-    let parsed: serde_json::Value = serde_json::from_str(&json_str)
-        .expect("Invalid JSON");
+    let parsed: serde_json::Value = serde_json::from_str(&json_str).expect("Invalid JSON");
 
     // Verify it has the expected structure
     assert!(parsed.get("traceEvents").is_some());
@@ -65,7 +64,9 @@ fn test_trace_data_timestamp_ordering() {
 
     // Timestamps should be in order
     for i in 1..data.events.len() {
-        assert!(data.events[i].timestamp >= data.events[i-1].timestamp,
-                "Timestamps should be non-decreasing");
+        assert!(
+            data.events[i].timestamp >= data.events[i - 1].timestamp,
+            "Timestamps should be non-decreasing"
+        );
     }
 }

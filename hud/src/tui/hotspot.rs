@@ -1,27 +1,30 @@
 use ratatui::{
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
     Frame,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::{CAUTION_AMBER, CRITICAL_RED, HUD_GREEN, INFO_DIM};
-use crate::analysis::{FunctionHotspot, analyze_hotspots};
+use crate::analysis::{analyze_hotspots, FunctionHotspot};
 use crate::trace_data::TraceData;
+
+/// Aggregated function data: (worker counts, file, line)
+type FunctionData = (HashMap<u32, usize>, Option<String>, Option<u32>);
 
 /// Hotspot view showing top functions by sample count
 pub struct HotspotView {
     scroll_offset: usize,
-    pub selected_index: usize,  // Public for testing
-    pub hotspots: Vec<FunctionHotspot>,  // Public for testing
+    pub selected_index: usize,          // Public for testing
+    pub hotspots: Vec<FunctionHotspot>, // Public for testing
     all_hotspots: Vec<FunctionHotspot>, // Unfiltered list
     filter_active: bool,
 }
 
 impl HotspotView {
-    pub fn new(data: &TraceData) -> Self {
+    #[must_use] pub fn new(data: &TraceData) -> Self {
         // Use analysis module to compute hotspots
         let hotspots = analyze_hotspots(data);
 
@@ -51,7 +54,7 @@ impl HotspotView {
         }
     }
 
-    pub fn get_selected(&self) -> Option<&FunctionHotspot> {
+    #[must_use] pub fn get_selected(&self) -> Option<&FunctionHotspot> {
         self.hotspots.get(self.selected_index)
     }
 
@@ -62,7 +65,8 @@ impl HotspotView {
         }
 
         let query_lower = query.to_lowercase();
-        self.hotspots = self.all_hotspots
+        self.hotspots = self
+            .all_hotspots
             .iter()
             .filter(|h| h.name.to_lowercase().contains(&query_lower))
             .cloned()
@@ -80,7 +84,7 @@ impl HotspotView {
         self.scroll_offset = 0;
     }
 
-    pub fn is_filtered(&self) -> bool {
+    #[must_use] pub fn is_filtered(&self) -> bool {
         self.filter_active
     }
 
@@ -96,34 +100,28 @@ impl HotspotView {
         let worker_set: HashSet<u32> = worker_ids.iter().copied().collect();
 
         // Rebuild hotspots from filtered events
-        let mut function_data: HashMap<String, (HashMap<u32, usize>, Option<String>, Option<u32>)> = HashMap::new();
+        let mut function_data: HashMap<String, FunctionData> = HashMap::new();
 
         for event in &data.events {
             if !worker_set.contains(&event.worker_id) {
                 continue;
             }
 
-            let entry = function_data.entry(event.name.clone()).or_insert_with(|| {
-                (HashMap::new(), event.file.clone(), event.line)
-            });
+            let entry = function_data
+                .entry(event.name.clone())
+                .or_insert_with(|| (HashMap::new(), event.file.clone(), event.line));
             *entry.0.entry(event.worker_id).or_insert(0) += 1;
         }
 
         // Convert to vector and calculate percentages
-        let total_samples = data.events.iter().filter(|e| worker_set.contains(&e.worker_id)).count();
+        let total_samples =
+            data.events.iter().filter(|e| worker_set.contains(&e.worker_id)).count();
         let mut hotspots: Vec<FunctionHotspot> = function_data
             .into_iter()
             .map(|(name, (workers, file, line))| {
                 let count: usize = workers.values().sum();
                 let percentage = (count as f64 / total_samples as f64) * 100.0;
-                FunctionHotspot {
-                    name,
-                    count,
-                    percentage,
-                    workers,
-                    file,
-                    line,
-                }
+                FunctionHotspot { name, count, percentage, workers, file, line }
             })
             .collect();
 
@@ -153,11 +151,8 @@ impl HotspotView {
         }
 
         // Show top functions (compact for glass cockpit)
-        for (display_idx, hotspot) in self.hotspots
-            .iter()
-            .skip(scroll_offset)
-            .take(display_count)
-            .enumerate()
+        for (display_idx, hotspot) in
+            self.hotspots.iter().skip(scroll_offset).take(display_count).enumerate()
         {
             let absolute_idx = scroll_offset + display_idx;
             let is_selected = absolute_idx == self.selected_index;
@@ -179,17 +174,18 @@ impl HotspotView {
             } else if hotspot.name.starts_with("<shared:") {
                 // Unresolved shared library address
                 ("🔗 [shared library]".to_string(), Some("No debug symbols"))
-            } else if (hotspot.name.starts_with("std::") ||
-                       hotspot.name.starts_with("core::") ||
-                       hotspot.name.starts_with("alloc::")) &&
-                      hotspot.file.is_none() {
+            } else if (hotspot.name.starts_with("std::")
+                || hotspot.name.starts_with("core::")
+                || hotspot.name.starts_with("alloc::"))
+                && hotspot.file.is_none()
+            {
                 // Resolved standard library function without source location
                 let short_name = if hotspot.name.len() > max_name_len {
                     format!("{}...", &hotspot.name[..max_name_len - 3])
                 } else {
                     hotspot.name.clone()
                 };
-                (format!("📚 {}", short_name), Some("Rust standard library"))
+                (format!("📚 {short_name}"), Some("Rust standard library"))
             } else {
                 // Normal user code function
                 let name = if hotspot.name.len() > max_name_len {
@@ -207,14 +203,12 @@ impl HotspotView {
                     .fg(severity_color)
                     .add_modifier(Modifier::BOLD | Modifier::REVERSED)
             } else {
-                Style::default()
-                    .fg(severity_color)
-                    .add_modifier(Modifier::BOLD)
+                Style::default().fg(severity_color).add_modifier(Modifier::BOLD)
             };
 
             lines.push(Line::from(vec![
                 Span::styled(selection_indicator, Style::default().fg(CAUTION_AMBER)),
-                Span::styled(format!("{}  ", marker), Style::default()),
+                Span::styled(format!("{marker}  "), Style::default()),
                 Span::styled(display_name, name_style),
             ]));
 
@@ -232,10 +226,7 @@ impl HotspotView {
                 lines.push(Line::from(vec![
                     Span::raw("     "),
                     Span::styled("ℹ️  ", Style::default().fg(INFO_DIM)),
-                    Span::styled(
-                        msg,
-                        Style::default().fg(INFO_DIM),
-                    ),
+                    Span::styled(msg, Style::default().fg(INFO_DIM)),
                 ]));
             }
 
@@ -251,7 +242,7 @@ impl HotspotView {
                         Span::raw("     "),
                         Span::styled("📍 ", Style::default().fg(INFO_DIM)),
                         Span::styled(
-                            format!("{}:{}", filename, line),
+                            format!("{filename}:{line}"),
                             Style::default().fg(INFO_DIM),
                         ),
                     ]));
@@ -267,8 +258,8 @@ impl HotspotView {
             "TOP ISSUES".to_string()
         };
 
-        let paragraph = Paragraph::new(lines)
-            .block(Block::default().borders(Borders::ALL).title(title));
+        let paragraph =
+            Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(title));
 
         f.render_widget(paragraph, area);
     }

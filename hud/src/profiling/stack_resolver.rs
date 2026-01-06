@@ -26,16 +26,16 @@ pub struct StackResolver<'a> {
 impl<'a> StackResolver<'a> {
     /// Create a new stack resolver
     pub fn new(symbolizer: &'a Symbolizer, memory_range: Option<MemoryRange>) -> Self {
-        Self {
-            symbolizer,
-            memory_range,
-        }
+        Self { symbolizer, memory_range }
     }
 
     /// Resolve and print a stack trace from an eBPF stack trace map
     ///
     /// This is the single source of truth for stack trace resolution.
     /// Previously this logic was duplicated in 3 places in main.rs.
+    ///
+    /// # Errors
+    /// Returns an error if stack trace lookup from eBPF map fails
     pub fn resolve_and_print<T: Borrow<MapData>>(
         &self,
         stack_id: StackId,
@@ -51,7 +51,7 @@ impl<'a> StackResolver<'a> {
         let stack_trace = match stack_traces.get(&stack_id.as_map_key(), 0) {
             Ok(trace) => trace,
             Err(e) => {
-                println!("\n   ⚠️  Failed to read stack trace: {}", e);
+                println!("\n   ⚠️  Failed to read stack trace: {e}");
                 return Ok(());
             }
         };
@@ -72,7 +72,7 @@ impl<'a> StackResolver<'a> {
 
             // Stop at null addresses
             if addr == 0 {
-                info!("Frame {} has address 0, stopping", i);
+                info!("Frame {i} has address 0, stopping");
                 break;
             }
 
@@ -85,7 +85,7 @@ impl<'a> StackResolver<'a> {
                 println!("      {}", resolved_frame.format(i));
             } else {
                 // Shared library - show address but don't symbolize
-                println!("      #{:<2} 0x{:016x} <shared library>", i, addr);
+                println!("      #{i:<2} 0x{addr:016x} <shared library>");
             }
         }
 
@@ -94,20 +94,17 @@ impl<'a> StackResolver<'a> {
 
     /// Adjust an address for PIE executables
     ///
-    /// Returns (adjusted_address, is_in_executable)
+    /// Returns (`adjusted_address`, `is_in_executable`)
     fn adjust_address(&self, addr: u64) -> (u64, bool) {
         if let Some(range) = self.memory_range {
             if range.contains(addr) {
                 // Address is in main executable, adjust to file offset
                 let adjusted = addr - range.start;
-                info!(
-                    "Address 0x{:016x} (in executable) -> 0x{:08x}",
-                    addr, adjusted
-                );
+                info!("Address 0x{addr:016x} (in executable) -> 0x{adjusted:08x}");
                 (adjusted, true)
             } else {
                 // Address is outside executable (shared library)
-                info!("Address 0x{:016x} (shared library, skipping)", addr);
+                info!("Address 0x{addr:016x} (shared library, skipping)");
                 (addr, false)
             }
         } else {
@@ -143,10 +140,7 @@ mod tests {
 
     #[test]
     fn test_memory_range_contains() {
-        let range = MemoryRange {
-            start: 0x1000,
-            end: 0x2000,
-        };
+        let range = MemoryRange { start: 0x1000, end: 0x2000 };
 
         assert!(range.contains(0x1000));
         assert!(range.contains(0x1500));
@@ -159,28 +153,22 @@ mod tests {
     #[test]
     fn test_adjust_address_in_executable() {
         let symbolizer = Symbolizer::new("/bin/ls").unwrap();
-        let range = MemoryRange {
-            start: 0x7f0000000000,
-            end: 0x7f0000100000,
-        };
+        let range = MemoryRange { start: 0x7f00_0000_0000, end: 0x7f00_0010_0000 };
         let resolver = StackResolver::new(&symbolizer, Some(range));
 
-        let (adjusted, in_exec) = resolver.adjust_address(0x7f0000050000);
-        assert_eq!(adjusted, 0x50000);
+        let (adjusted, in_exec) = resolver.adjust_address(0x7f00_0005_0000);
+        assert_eq!(adjusted, 0x5_0000);
         assert!(in_exec);
     }
 
     #[test]
     fn test_adjust_address_shared_library() {
         let symbolizer = Symbolizer::new("/bin/ls").unwrap();
-        let range = MemoryRange {
-            start: 0x7f0000000000,
-            end: 0x7f0000100000,
-        };
+        let range = MemoryRange { start: 0x7f00_0000_0000, end: 0x7f00_0010_0000 };
         let resolver = StackResolver::new(&symbolizer, Some(range));
 
-        let (adjusted, in_exec) = resolver.adjust_address(0x7f0001000000);
-        assert_eq!(adjusted, 0x7f0001000000); // Unchanged
+        let (adjusted, in_exec) = resolver.adjust_address(0x7f00_0100_0000);
+        assert_eq!(adjusted, 0x7f00_0100_0000); // Unchanged
         assert!(!in_exec);
     }
 
@@ -189,8 +177,8 @@ mod tests {
         let symbolizer = Symbolizer::new("/bin/ls").unwrap();
         let resolver = StackResolver::new(&symbolizer, None);
 
-        let (adjusted, in_exec) = resolver.adjust_address(0x12345678);
-        assert_eq!(adjusted, 0x12345678); // Unchanged
+        let (adjusted, in_exec) = resolver.adjust_address(0x1234_5678);
+        assert_eq!(adjusted, 0x1234_5678); // Unchanged
         assert!(in_exec); // Assume in executable when no range
     }
 }

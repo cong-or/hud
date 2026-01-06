@@ -3,8 +3,8 @@
 //! This module contains the data structures for both live and replay modes
 
 use anyhow::Result;
-use std::path::Path;
 use std::collections::HashSet;
+use std::path::Path;
 
 /// Represents a single trace event
 #[derive(Debug, Clone)]
@@ -37,9 +37,15 @@ pub struct LiveData {
     start_time: Option<f64>,
 }
 
+impl Default for LiveData {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LiveData {
     /// Create a new empty live data set
-    pub fn new() -> Self {
+    #[must_use] pub fn new() -> Self {
         Self {
             events: Vec::new(),
             workers_set: HashSet::new(),
@@ -59,7 +65,7 @@ impl LiveData {
         // Track workers
         if self.workers_set.insert(event.worker_id) {
             self.workers.push(event.worker_id);
-            self.workers.sort();
+            self.workers.sort_unstable();
         }
 
         // Update duration
@@ -71,12 +77,12 @@ impl LiveData {
     }
 
     /// Get event count
-    pub fn event_count(&self) -> usize {
+    #[must_use] pub fn event_count(&self) -> usize {
         self.events.len()
     }
 
-    /// Convert to TraceData for compatibility with existing TUI code
-    pub fn as_trace_data(&self) -> TraceData {
+    /// Convert to `TraceData` for compatibility with existing TUI code
+    #[must_use] pub fn as_trace_data(&self) -> TraceData {
         TraceData {
             events: self.events.clone(),
             workers: self.workers.clone(),
@@ -87,6 +93,10 @@ impl LiveData {
 
 impl TraceData {
     /// Parse trace.json into our internal representation
+    ///
+    /// # Errors
+    /// Returns an error if the file cannot be read or parsed as JSON
+    #[allow(clippy::cast_possible_truncation)]
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self> {
         let content = std::fs::read_to_string(path)?;
         let json: serde_json::Value = serde_json::from_str(&content)?;
@@ -108,7 +118,7 @@ impl TraceData {
                 let timestamp = event["ts"].as_f64().unwrap_or(0.0) / 1_000_000.0; // Convert µs to seconds
                 let cpu = event["args"]["cpu_id"].as_u64().unwrap_or(0) as u32;
                 let detection_method = event["args"]["detection_method"].as_u64().map(|v| v as u32);
-                let file = event["args"]["file"].as_str().map(|s| s.to_string());
+                let file = event["args"]["file"].as_str().map(std::string::ToString::to_string);
                 let line = event["args"]["line"].as_u64().map(|v| v as u32);
 
                 workers.insert(worker_id);
@@ -128,12 +138,8 @@ impl TraceData {
         }
 
         let mut workers: Vec<u32> = workers.into_iter().collect();
-        workers.sort();
+        workers.sort_unstable();
 
-        Ok(TraceData {
-            events,
-            workers,
-            duration: max_timestamp,
-        })
+        Ok(TraceData { events, workers, duration: max_timestamp })
     }
 }

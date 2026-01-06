@@ -2,8 +2,8 @@
 //!
 //! Using thiserror for automatic Display implementation and error chaining.
 
-use thiserror::Error;
 use super::types::Pid;
+use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum ProfilerError {
@@ -17,11 +17,7 @@ pub enum ProfilerError {
     NoWorkersFound(Pid),
 
     #[error("Failed to attach {probe} to {binary}: {error}")]
-    ProbeAttachFailed {
-        probe: String,
-        binary: String,
-        error: String,
-    },
+    ProbeAttachFailed { probe: String, binary: String, error: String },
 
     #[error("Symbol resolution failed: {0}")]
     SymbolizationFailed(String),

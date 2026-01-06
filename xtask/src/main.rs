@@ -1,6 +1,6 @@
-use std::process::Command;
-use clap::Parser;
 use anyhow::{Context, Result};
+use clap::Parser;
+use std::process::Command;
 
 #[derive(Parser)]
 struct Args {
@@ -22,20 +22,20 @@ fn main() -> Result<()> {
     let args = Args::parse();
 
     match args.command {
-        Cmd::BuildEbpf { target, release } => build_ebpf(target, release)?,
+        Cmd::BuildEbpf { target, release } => build_ebpf(&target, release)?,
     }
 
     Ok(())
 }
 
-fn build_ebpf(target: String, release: bool) -> Result<()> {
+fn build_ebpf(target: &str, release: bool) -> Result<()> {
     let mut cmd = Command::new("cargo");
     cmd.arg("+nightly")
         .arg("build")
         .arg("--package")
         .arg("hud-ebpf")
         .arg("--target")
-        .arg(&target)
+        .arg(target)
         .arg("-Z")
         .arg("build-std=core");
 
@@ -50,7 +50,7 @@ fn build_ebpf(target: String, release: bool) -> Result<()> {
     }
 
     println!("✓ eBPF program built successfully");
-    println!("  Target: {}", target);
+    println!("  Target: {target}");
     println!("  Profile: {}", if release { "release" } else { "debug" });
 
     Ok(())

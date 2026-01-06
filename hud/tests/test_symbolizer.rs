@@ -5,7 +5,7 @@ fn test_symbolizer_creation() {
     // Test that we can create a symbolizer for a binary
     let binary_path = env!("CARGO_BIN_EXE_hud");
 
-    println!("Testing symbolizer creation on: {}", binary_path);
+    println!("Testing symbolizer creation on: {binary_path}");
 
     let symbolizer = Symbolizer::new(binary_path);
     assert!(symbolizer.is_ok(), "Failed to create symbolizer: {:?}", symbolizer.err());
@@ -18,14 +18,13 @@ fn test_symbolizer_resolves_function_names() {
     // Test that the symbolizer can resolve addresses to function names
     let binary_path = env!("CARGO_BIN_EXE_hud");
 
-    println!("Testing symbolization on: {}", binary_path);
+    println!("Testing symbolization on: {binary_path}");
 
-    let symbolizer = Symbolizer::new(binary_path)
-        .expect("Failed to create symbolizer");
+    let symbolizer = Symbolizer::new(binary_path).expect("Failed to create symbolizer");
 
     // Get function addresses from nm
     let nm_output = std::process::Command::new("nm")
-        .args(&["-C", binary_path])
+        .args(["-C", binary_path])
         .output()
         .expect("Failed to run nm");
 
@@ -41,7 +40,7 @@ fn test_symbolizer_resolves_function_names() {
             if let Some(addr_str) = parts.first() {
                 if let Ok(addr) = u64::from_str_radix(addr_str, 16) {
                     attempts += 1;
-                    println!("\nTrying address: 0x{:x} ({})", addr, line);
+                    println!("\nTrying address: 0x{addr:x} ({line})");
 
                     let resolved = symbolizer.resolve(addr);
                     println!("  Resolved address: 0x{:x}", resolved.addr);
@@ -59,7 +58,7 @@ fn test_symbolizer_resolves_function_names() {
                                 if let Some(ref loc) = frame.location {
                                     if let Some(ref file) = loc.file {
                                         if let Some(line) = loc.line {
-                                            println!("  📍 {}:{}", file, line);
+                                            println!("  📍 {file}:{line}");
                                             println!("\n✅ SUCCESS: Full debug info available!");
                                             return;
                                         }
@@ -74,10 +73,12 @@ fn test_symbolizer_resolves_function_names() {
     }
 
     // We should have found at least one valid symbol
-    assert!(found_valid_symbol,
-            "Symbolizer should resolve at least one address to a function name.\n\
-             Tried {} addresses but all resolved to '<unknown>'.\n\
-             This might indicate missing debug symbols.", attempts);
+    assert!(
+        found_valid_symbol,
+        "Symbolizer should resolve at least one address to a function name.\n\
+             Tried {attempts} addresses but all resolved to '<unknown>'.\n\
+             This might indicate missing debug symbols."
+    );
 
     println!("\n✅ SUCCESS: Symbolizer can resolve function names!");
 }
@@ -89,12 +90,11 @@ fn test_dwarf_debug_info_available() {
     // It's ignored by default because it depends on build configuration
 
     let binary_path = env!("CARGO_BIN_EXE_hud");
-    let symbolizer = Symbolizer::new(binary_path)
-        .expect("Failed to create symbolizer");
+    let symbolizer = Symbolizer::new(binary_path).expect("Failed to create symbolizer");
 
     // Get function addresses
     let nm_output = std::process::Command::new("nm")
-        .args(&["-C", binary_path])
+        .args(["-C", binary_path])
         .output()
         .expect("Failed to run nm");
 
@@ -111,7 +111,10 @@ fn test_dwarf_debug_info_available() {
                     for frame in &resolved.frames {
                         if let Some(ref loc) = frame.location {
                             if let (Some(ref file), Some(line)) = (&loc.file, loc.line) {
-                                println!("✅ Found debug info: {} at {}:{}", frame.function, file, line);
+                                println!(
+                                    "✅ Found debug info: {} at {}:{}",
+                                    frame.function, file, line
+                                );
                                 return; // Success!
                             }
                         }

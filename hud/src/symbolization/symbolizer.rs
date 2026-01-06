@@ -1,3 +1,6 @@
+// String formatting intentionally uses format! for clarity
+#![allow(clippy::format_push_string)]
+
 use addr2line::Context;
 use anyhow::{Context as _, Result};
 use gimli::{EndianRcSlice, RunTimeEndian};
@@ -15,57 +18,37 @@ use std::rc::Rc;
 /// which significantly improves performance when symbolizing stack traces.
 pub struct Symbolizer {
     ctx: Context<EndianRcSlice<RunTimeEndian>>,
-    base_addr: u64,
     /// Cache of resolved frames by address
     cache: RefCell<HashMap<u64, ResolvedFrame>>,
 }
 
 impl Symbolizer {
     /// Create a new symbolizer for the given binary
+    ///
+    /// # Errors
+    /// Returns an error if the binary file cannot be read or parsed, or if DWARF debug info is missing
     pub fn new<P: AsRef<Path>>(binary_path: P) -> Result<Self> {
-        let binary_data = fs::read(binary_path.as_ref())
-            .context("Failed to read binary file")?;
+        let binary_data = fs::read(binary_path.as_ref()).context("Failed to read binary file")?;
 
-        let obj_file = object::File::parse(&*binary_data)
-            .context("Failed to parse object file")?;
-
-        // Get the base address (for position-independent executables)
-        let base_addr = obj_file
-            .sections()
-            .filter_map(|s| {
-                if s.name().ok()? == ".text" {
-                    Some(s.address())
-                } else {
-                    None
-                }
-            })
-            .next()
-            .unwrap_or(0);
+        let obj_file = object::File::parse(&*binary_data).context("Failed to parse object file")?;
 
         // Load DWARF debug info
-        let endian = if obj_file.is_little_endian() {
-            RunTimeEndian::Little
-        } else {
-            RunTimeEndian::Big
-        };
+        let endian =
+            if obj_file.is_little_endian() { RunTimeEndian::Little } else { RunTimeEndian::Big };
 
-        let load_section = |id: gimli::SectionId| -> Result<EndianRcSlice<RunTimeEndian>, gimli::Error> {
-            let data = obj_file
-                .section_by_name(id.name())
-                .and_then(|section| section.uncompressed_data().ok())
-                .unwrap_or(std::borrow::Cow::Borrowed(&[][..]));
-            Ok(EndianRcSlice::new(Rc::from(&*data), endian))
-        };
+        let load_section =
+            |id: gimli::SectionId| -> Result<EndianRcSlice<RunTimeEndian>, gimli::Error> {
+                let data = obj_file
+                    .section_by_name(id.name())
+                    .and_then(|section| section.uncompressed_data().ok())
+                    .unwrap_or(std::borrow::Cow::Borrowed(&[][..]));
+                Ok(EndianRcSlice::new(Rc::from(&*data), endian))
+            };
 
         let dwarf = gimli::Dwarf::load(&load_section)?;
-        let ctx = Context::from_dwarf(dwarf)
-            .context("Failed to load DWARF debug information")?;
+        let ctx = Context::from_dwarf(dwarf).context("Failed to load DWARF debug information")?;
 
-        Ok(Self {
-            ctx,
-            base_addr,
-            cache: RefCell::new(HashMap::new()),
-        })
+        Ok(Self { ctx, cache: RefCell::new(HashMap::new()) })
     }
 
     /// Resolve an instruction pointer to source location information
@@ -82,31 +65,25 @@ impl Symbolizer {
 
         if let Ok(mut frame_iter) = self.ctx.find_frames(addr).skip_all_loads() {
             while let Ok(Some(frame)) = frame_iter.next() {
-                let function = frame.function
+                let function = frame
+                    .function
                     .and_then(|f| f.demangle().ok().map(|s| s.to_string()))
                     .unwrap_or_else(|| "<unknown>".to_string());
 
-                let location = frame.location
-                    .map(|loc| SourceLocation {
-                        file: loc.file.map(|f| f.to_string()),
-                        line: loc.line,
-                        column: loc.column,
-                    });
-
-                result.push(InlinedFrame {
-                    function,
-                    location,
+                let location = frame.location.map(|loc| SourceLocation {
+                    file: loc.file.map(std::string::ToString::to_string),
+                    line: loc.line,
+                    column: loc.column,
                 });
+
+                result.push(InlinedFrame { function, location });
             }
         }
 
         let resolved = ResolvedFrame {
             addr,
             frames: if result.is_empty() {
-                vec![InlinedFrame {
-                    function: "<unknown>".to_string(),
-                    location: None,
-                }]
+                vec![InlinedFrame { function: "<unknown>".to_string(), location: None }]
             } else {
                 result
             },
@@ -119,7 +96,7 @@ impl Symbolizer {
     }
 
     /// Demangle a Rust symbol name
-    pub fn demangle_symbol(symbol: &str) -> String {
+    #[must_use] pub fn demangle_symbol(symbol: &str) -> String {
         format!("{:#}", demangle(symbol))
     }
 }
@@ -148,29 +125,21 @@ pub struct SourceLocation {
 
 impl ResolvedFrame {
     /// Format the frame for display
-    pub fn format(&self, frame_num: usize) -> String {
+    #[must_use] pub fn format(&self, frame_num: usize) -> String {
         let mut output = String::new();
 
         for (idx, inlined) in self.frames.iter().enumerate() {
-            let prefix = if idx == 0 {
-                format!("#{:<2}", frame_num)
-            } else {
-                "    ".to_string()
-            };
+            let prefix = if idx == 0 { format!("#{frame_num:<2}") } else { "    ".to_string() };
 
-            output.push_str(&format!("{} 0x{:016x} {}",
-                prefix,
-                self.addr,
-                inlined.function
-            ));
+            output.push_str(&format!("{} 0x{:016x} {}", prefix, self.addr, inlined.function));
 
             if let Some(ref loc) = inlined.location {
                 if let Some(ref file) = loc.file {
-                    output.push_str(&format!("\n                      at {}", file));
+                    output.push_str(&format!("\n                      at {file}"));
                     if let Some(line) = loc.line {
-                        output.push_str(&format!(":{}", line));
+                        output.push_str(&format!(":{line}"));
                         if let Some(col) = loc.column {
-                            output.push_str(&format!(":{}", col));
+                            output.push_str(&format!(":{col}"));
                         }
                     }
                 }

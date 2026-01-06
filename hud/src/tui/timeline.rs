@@ -11,10 +11,9 @@ use super::TraceData;
 
 /// Timeline view showing worker activity over time
 pub struct TimelineView {
-    scroll_offset: usize,
     worker_stats: HashMap<u32, WorkerStats>,
-    zoom_level: f64,    // 1.0 = normal, >1.0 = zoomed in
-    pan_offset: f64,    // 0.0 to 1.0, position in timeline
+    zoom_level: f64, // 1.0 = normal, >1.0 = zoomed in
+    pan_offset: f64, // 0.0 to 1.0, position in timeline
 }
 
 #[derive(Debug, Clone)]
@@ -42,20 +41,7 @@ impl TimelineView {
             }
         }
 
-        Self {
-            scroll_offset: 0,
-            worker_stats,
-            zoom_level: 1.0,
-            pan_offset: 0.0,
-        }
-    }
-
-    pub fn scroll_up(&mut self) {
-        self.scroll_offset = self.scroll_offset.saturating_sub(1);
-    }
-
-    pub fn scroll_down(&mut self) {
-        self.scroll_offset = self.scroll_offset.saturating_add(1);
+        Self { worker_stats, zoom_level: 1.0, pan_offset: 0.0 }
     }
 
     pub fn zoom_in(&mut self) {
@@ -64,8 +50,8 @@ impl TimelineView {
 
     pub fn zoom_out(&mut self) {
         self.zoom_level = (self.zoom_level / 1.5).max(1.0);
-        // Reset pan when fully zoomed out
-        if self.zoom_level == 1.0 {
+        // Reset pan when fully zoomed out (using <= for robustness)
+        if self.zoom_level <= 1.0 {
             self.pan_offset = 0.0;
         }
     }
@@ -81,10 +67,6 @@ impl TimelineView {
             let max_pan = 1.0 - (1.0 / self.zoom_level);
             self.pan_offset = (self.pan_offset + 0.1).min(max_pan);
         }
-    }
-
-    pub fn get_zoom_info(&self) -> (f64, f64) {
-        (self.zoom_level, self.pan_offset)
     }
 
     pub fn render(&self, f: &mut Frame, area: Rect, data: &TraceData) {
@@ -103,25 +85,16 @@ impl TimelineView {
                 Style::default().fg(Color::Cyan),
             ),
             Span::raw("    Total events: "),
-            Span::styled(
-                data.events.len().to_string(),
-                Style::default().fg(Color::Green),
-            ),
+            Span::styled(data.events.len().to_string(), Style::default().fg(Color::Green)),
             Span::styled(zoom_text, Style::default().fg(Color::Yellow)),
         ]));
         lines.push(Line::from(""));
 
         // Column headers
         lines.push(Line::from(vec![
-            Span::styled(
-                "Worker",
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-            ),
+            Span::styled("Worker", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
             Span::raw("    "),
-            Span::styled(
-                "TID",
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-            ),
+            Span::styled("TID", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
             Span::raw("      "),
             Span::styled(
                 "Samples",
@@ -161,17 +134,14 @@ impl TimelineView {
 
                 lines.push(Line::from(vec![
                     Span::raw(format!("{:<8}", format!("Worker {}", worker_id))),
-                    Span::styled(
-                        format!("{:<8}", stats.tid),
-                        Style::default().fg(Color::DarkGray),
-                    ),
+                    Span::styled(format!("{:<8}", stats.tid), Style::default().fg(Color::DarkGray)),
                     Span::raw(format!(
                         "{:>4}/{:<4}",
                         stats.samples_with_functions, stats.total_samples
                     )),
                     Span::raw("  "),
                     Span::styled(bar, Style::default().fg(bar_color)),
-                    Span::raw(format!(" {:.0}%", success_rate)),
+                    Span::raw(format!(" {success_rate:.0}%")),
                     Span::raw(marker),
                 ]));
             }

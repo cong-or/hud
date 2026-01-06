@@ -11,7 +11,7 @@
 use std::time::Duration;
 use tokio::time::sleep;
 
-#[tokio::main(flavor = "current_thread")]  // ← Single thread!
+#[tokio::main(flavor = "current_thread")] // ← Single thread!
 async fn main() {
     println!("🚀 Single-Threaded Test App");
     println!("   WARNING: Blocking will freeze EVERYTHING\n");
@@ -31,7 +31,7 @@ async fn main() {
 
     // Main loop
     for round in 0..10 {
-        println!("\n[Round {}] Spawning tasks...", round);
+        println!("\n[Round {round}] Spawning tasks...");
 
         for i in 0..5 {
             tokio::spawn(quick_task(round, i));
@@ -45,17 +45,17 @@ async fn main() {
 }
 
 async fn well_behaved_task(id: u32) {
-    println!("  ✓ Task {} starting", id);
+    println!("  ✓ Task {id} starting");
 
     for i in 0..20 {
         sleep(Duration::from_millis(100)).await;
 
         if i % 5 == 0 {
-            println!("  ✓ Task {} checkpoint {}/20", id, i);
+            println!("  ✓ Task {id} checkpoint {i}/20");
         }
     }
 
-    println!("  ✓ Task {} complete", id);
+    println!("  ✓ Task {id} complete");
 }
 
 async fn blocking_task() {
@@ -73,7 +73,7 @@ async fn blocking_task() {
             result = result.wrapping_add((0..10000).sum::<u64>());
         }
 
-        println!("  🔴 Blocking complete (result: {})", result);
+        println!("  🔴 Blocking complete (result: {result})");
         println!("      ^ ALL tasks were frozen for 450ms!");
     }
 
@@ -83,6 +83,6 @@ async fn blocking_task() {
 async fn quick_task(round: u32, id: u32) {
     sleep(Duration::from_millis(10)).await;
     if id == 0 {
-        println!("    → Batch {} quick tasks done", round);
+        println!("    → Batch {round} quick tasks done");
     }
 }

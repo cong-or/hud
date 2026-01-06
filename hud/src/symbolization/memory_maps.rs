@@ -17,7 +17,7 @@ pub struct MemoryRange {
 
 impl MemoryRange {
     /// Check if an address falls within this memory range
-    pub fn contains(&self, addr: u64) -> bool {
+    #[must_use] pub fn contains(&self, addr: u64) -> bool {
         addr >= self.start && addr < self.end
     }
 }
@@ -32,13 +32,11 @@ impl MemoryRange {
 /// * `pid` - The process ID to query
 /// * `binary_path` - The path to the binary to find (e.g., "/path/to/executable")
 ///
-/// # Returns
-/// The memory range covering all mappings of the binary, or an error if
-/// the binary is not found in the process's memory maps.
+/// # Errors
+/// Returns an error if /proc/pid/maps cannot be read or if the binary is not found
 pub fn parse_memory_maps(pid: i32, binary_path: &str) -> Result<MemoryRange> {
-    let maps_path = format!("/proc/{}/maps", pid);
-    let maps = fs::read_to_string(&maps_path)
-        .context(format!("Failed to read {}", maps_path))?;
+    let maps_path = format!("/proc/{pid}/maps");
+    let maps = fs::read_to_string(&maps_path).context(format!("Failed to read {maps_path}"))?;
 
     let mut start_addr = None;
     let mut end_addr = None;
@@ -75,10 +73,7 @@ pub fn parse_memory_maps(pid: i32, binary_path: &str) -> Result<MemoryRange> {
             );
             Ok(MemoryRange { start, end })
         }
-        _ => Err(anyhow::anyhow!(
-            "Could not find memory range for {}",
-            binary_path
-        )),
+        _ => Err(anyhow::anyhow!("Could not find memory range for {binary_path}")),
     }
 }
 
@@ -88,10 +83,7 @@ mod tests {
 
     #[test]
     fn test_memory_range_contains() {
-        let range = MemoryRange {
-            start: 0x1000,
-            end: 0x2000,
-        };
+        let range = MemoryRange { start: 0x1000, end: 0x2000 };
 
         assert!(range.contains(0x1000));
         assert!(range.contains(0x1500));

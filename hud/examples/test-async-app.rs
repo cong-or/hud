@@ -96,7 +96,7 @@ async fn main() {
 
     // Main loop - spawn tasks periodically
     for round in 0..20 {
-        println!("\n[Round {}] Spawning burst of tasks...", round);
+        println!("\n[Round {round}] Spawning burst of tasks...");
 
         // Spawn a burst of quick tasks
         for i in 0..10 {
@@ -113,7 +113,7 @@ async fn main() {
 
 /// Well-behaved async task - lots of awaiting, minimal CPU work
 async fn well_behaved_task(id: u32) {
-    println!("  ✓ Task {} (well-behaved) starting", id);
+    println!("  ✓ Task {id} (well-behaved) starting");
 
     for i in 0..50 {
         // Simulate async I/O - this yields to the executor
@@ -123,11 +123,11 @@ async fn well_behaved_task(id: u32) {
         let _result = (0..1000).sum::<u64>();
 
         if i % 10 == 0 {
-            println!("  ✓ Task {} checkpoint {}/50", id, i);
+            println!("  ✓ Task {id} checkpoint {i}/50");
         }
     }
 
-    println!("  ✓ Task {} (well-behaved) complete", id);
+    println!("  ✓ Task {id} (well-behaved) complete");
 }
 
 /// Blocking task - does CPU work without yielding (BAD!)
@@ -160,7 +160,7 @@ async fn blocking_task() {
         // eBPF trace point: blocking ends
         trace_blocking_end();
 
-        println!("  🔴 Blocking task finished CPU work (result: {})", result);
+        println!("  🔴 Blocking task finished CPU work (result: {result})");
         println!("      ^ This blocked the executor for ~450ms!");
     }
 
@@ -176,6 +176,6 @@ async fn quick_task(round: u32, id: u32) {
     let _result = (0..100).sum::<u64>();
 
     if id == 0 {
-        println!("    → Quick task batch {} complete", round);
+        println!("    → Quick task batch {round} complete");
     }
 }

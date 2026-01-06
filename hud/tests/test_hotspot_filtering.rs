@@ -1,4 +1,4 @@
-use hud::tui::{TraceData, hotspot::HotspotView};
+use hud::tui::{hotspot::HotspotView, TraceData};
 
 #[test]
 fn test_hotspot_aggregates_events_by_function_name() {
@@ -18,7 +18,9 @@ fn test_hotspot_calculates_correct_counts() {
     let view = HotspotView::new(&data);
 
     // Find test_function_a
-    let func_a = view.hotspots.iter()
+    let func_a = view
+        .hotspots
+        .iter()
         .find(|h| h.name == "test_function_a")
         .expect("Should find test_function_a");
 
@@ -33,12 +35,13 @@ fn test_hotspot_calculates_correct_percentages() {
 
     // Total events: 4
     // test_function_a: 2/4 = 50%
-    let func_a = view.hotspots.iter()
+    let func_a = view
+        .hotspots
+        .iter()
         .find(|h| h.name == "test_function_a")
         .expect("Should find test_function_a");
 
-    assert!((func_a.percentage - 50.0).abs() < 0.1,
-            "Expected 50%, got {}", func_a.percentage);
+    assert!((func_a.percentage - 50.0).abs() < 0.1, "Expected 50%, got {}", func_a.percentage);
 }
 
 #[test]
@@ -49,8 +52,10 @@ fn test_hotspot_sorts_by_count_descending() {
 
     // First hotspot should have highest count
     for i in 1..view.hotspots.len() {
-        assert!(view.hotspots[i-1].count >= view.hotspots[i].count,
-                "Hotspots should be sorted by count descending");
+        assert!(
+            view.hotspots[i - 1].count >= view.hotspots[i].count,
+            "Hotspots should be sorted by count descending"
+        );
     }
 }
 
@@ -166,8 +171,7 @@ fn test_hotspot_filter_by_workers_recalculates_percentages() {
 
     // test_function_a should be 100% (2/2)
     let func_a = &view.hotspots[0];
-    assert!((func_a.percentage - 100.0).abs() < 0.1,
-            "Expected 100%, got {}", func_a.percentage);
+    assert!((func_a.percentage - 100.0).abs() < 0.1, "Expected 100%, got {}", func_a.percentage);
 }
 
 #[test]
@@ -260,7 +264,9 @@ fn test_hotspot_preserves_file_line_info() {
     let data = TraceData::from_file(trace_path).unwrap();
     let view = HotspotView::new(&data);
 
-    let func_a = view.hotspots.iter()
+    let func_a = view
+        .hotspots
+        .iter()
         .find(|h| h.name == "test_function_a")
         .expect("Should find test_function_a");
 
@@ -274,7 +280,9 @@ fn test_hotspot_tracks_worker_distribution() {
     let data = TraceData::from_file(trace_path).unwrap();
     let view = HotspotView::new(&data);
 
-    let func_a = view.hotspots.iter()
+    let func_a = view
+        .hotspots
+        .iter()
         .find(|h| h.name == "test_function_a")
         .expect("Should find test_function_a");
 

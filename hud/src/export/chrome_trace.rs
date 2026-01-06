@@ -1,3 +1,6 @@
+// Time conversions intentionally lose precision for Chrome trace format
+#![allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+
 use anyhow::{Context, Result};
 use hud_common::{TaskEvent, TRACE_EXECUTION_END, TRACE_EXECUTION_START};
 use serde::{Deserialize, Serialize};
@@ -8,7 +11,7 @@ use std::io::Write;
 use crate::symbolization::{MemoryRange, Symbolizer};
 
 /// Chrome Trace Event format
-/// Spec: https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview
+/// Spec: <https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview>
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ChromeTraceEvent {
     /// Event name (usually function name)
@@ -43,7 +46,7 @@ pub struct ChromeTraceExporter {
     events: Vec<ChromeTraceEvent>,
     /// Symbolizer for resolving stack traces
     symbolizer: Symbolizer,
-    /// Cache for resolved symbols (stack_id -> (function name, file, line))
+    /// Cache for resolved symbols (`stack_id` -> (function name, file, line))
     symbol_cache: HashMap<i64, (String, Option<String>, Option<u32>)>,
     /// Memory range for address adjustment
     memory_range: Option<MemoryRange>,
@@ -69,8 +72,12 @@ impl ChromeTraceExporter {
     }
 
     /// Resolve a symbol from a stack trace
-    /// Returns (function_name, file, line)
-    fn resolve_symbol(&mut self, stack_id: i64, addr: u64) -> (String, Option<String>, Option<u32>) {
+    /// Returns (`function_name`, file, line)
+    fn resolve_symbol(
+        &mut self,
+        stack_id: i64,
+        addr: u64,
+    ) -> (String, Option<String>, Option<u32>) {
         // Check cache first
         if let Some(cached) = self.symbol_cache.get(&stack_id) {
             return cached.clone();
@@ -97,18 +104,16 @@ impl ChromeTraceExporter {
             // Get the outermost (non-inlined) function name and location
             if let Some(frame) = resolved.frames.first() {
                 let func = frame.function.clone();
-                let file_path = frame.location.as_ref()
-                    .and_then(|loc| loc.file.clone());
-                let line_num = frame.location.as_ref()
-                    .and_then(|loc| loc.line);
+                let file_path = frame.location.as_ref().and_then(|loc| loc.file.clone());
+                let line_num = frame.location.as_ref().and_then(|loc| loc.line);
 
                 (func, file_path, line_num)
             } else {
-                (format!("0x{:x}", addr), None, None)
+                (format!("0x{addr:x}"), None, None)
             }
         } else {
             // For shared libraries, just show address
-            (format!("<shared:0x{:x}>", addr), None, None)
+            (format!("<shared:0x{addr:x}>"), None, None)
         };
 
         // Cache the complete result (function name, file, line)
@@ -118,6 +123,9 @@ impl ChromeTraceExporter {
     }
 
     /// Add a task event to the trace
+    ///
+    /// # Panics
+    /// Panics if `start_timestamp_ns` is None (this should never happen as it's initialized on first event)
     pub fn add_event(&mut self, event: &TaskEvent, top_frame_addr: Option<u64>) {
         // Initialize start timestamp on first event
         if self.start_timestamp_ns.is_none() {
@@ -154,7 +162,10 @@ impl ChromeTraceExporter {
                 }
                 // Add detection_method to distinguish between sched_switch and perf_event samples
                 if event.detection_method != 0 {
-                    args.insert("detection_method".to_string(), serde_json::json!(event.detection_method));
+                    args.insert(
+                        "detection_method".to_string(),
+                        serde_json::json!(event.detection_method),
+                    );
                 }
                 // Add source location if available
                 if let Some(file_path) = file {
@@ -167,7 +178,7 @@ impl ChromeTraceExporter {
                 self.events.push(ChromeTraceEvent {
                     name: function_name,
                     cat: "execution".to_string(),
-                    ph: "B".to_string(),  // Begin
+                    ph: "B".to_string(), // Begin
                     ts: ts_us,
                     pid: event.pid,
                     tid: event.tid,
@@ -182,13 +193,16 @@ impl ChromeTraceExporter {
                 args.insert("worker_id".to_string(), serde_json::json!(event.worker_id));
                 args.insert("cpu_id".to_string(), serde_json::json!(event.cpu_id));
                 if event.detection_method != 0 {
-                    args.insert("detection_method".to_string(), serde_json::json!(event.detection_method));
+                    args.insert(
+                        "detection_method".to_string(),
+                        serde_json::json!(event.detection_method),
+                    );
                 }
 
                 self.events.push(ChromeTraceEvent {
                     name: "execution".to_string(),
                     cat: "execution".to_string(),
-                    ph: "E".to_string(),  // End
+                    ph: "E".to_string(), // End
                     ts: ts_us,
                     pid: event.pid,
                     tid: event.tid,
@@ -205,6 +219,9 @@ impl ChromeTraceExporter {
     ///
     /// This method accepts any type implementing `Write`, making it flexible
     /// for testing (using in-memory buffers) and production (files, stdout).
+    ///
+    /// # Errors
+    /// Returns an error if JSON serialization or writing to the output fails
     ///
     /// # Example
     /// ```
@@ -240,7 +257,7 @@ impl ChromeTraceExporter {
         let mut threads: HashMap<(u32, u32), u32> = HashMap::new();
         for event in &self.events {
             if let Some(ref args) = event.args {
-                if let Some(worker_id) = args.get("worker_id").and_then(|v| v.as_u64()) {
+                if let Some(worker_id) = args.get("worker_id").and_then(serde_json::Value::as_u64) {
                     threads.insert((event.pid, event.tid), worker_id as u32);
                 }
             }
@@ -253,8 +270,8 @@ impl ChromeTraceExporter {
 
             all_events.push(ChromeTraceEvent {
                 name: "thread_name".to_string(),
-                cat: "".to_string(),
-                ph: "M".to_string(),  // Metadata
+                cat: String::new(),
+                ph: "M".to_string(), // Metadata
                 ts: 0.0,
                 pid,
                 tid,
@@ -262,13 +279,9 @@ impl ChromeTraceExporter {
             });
         }
 
-        let trace = ChromeTrace {
-            trace_events: all_events,
-            display_time_unit: "ms".to_string(),
-        };
+        let trace = ChromeTrace { trace_events: all_events, display_time_unit: "ms".to_string() };
 
-        serde_json::to_writer_pretty(writer, &trace)
-            .context("Failed to write trace JSON")?;
+        serde_json::to_writer_pretty(writer, &trace).context("Failed to write trace JSON")?;
 
         Ok(())
     }

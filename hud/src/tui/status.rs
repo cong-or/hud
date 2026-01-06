@@ -1,6 +1,6 @@
 use ratatui::{
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
     Frame,
@@ -17,7 +17,8 @@ pub struct StatusPanel {
 impl StatusPanel {
     pub fn new(data: &TraceData) -> Self {
         // Find busiest worker
-        let mut worker_activity: std::collections::HashMap<u32, (usize, usize)> = std::collections::HashMap::new();
+        let mut worker_activity: std::collections::HashMap<u32, (usize, usize)> =
+            std::collections::HashMap::new();
 
         for event in &data.events {
             let entry = worker_activity.entry(event.worker_id).or_insert((0, 0));
@@ -29,28 +30,24 @@ impl StatusPanel {
 
         let busiest = worker_activity
             .iter()
-            .max_by_key(|(_, (total, with_funcs))| {
-                if *total > 0 {
-                    (*with_funcs * 100) / *total
-                } else {
-                    0
-                }
-            })
+            .max_by_key(
+                |(_, (total, with_funcs))| {
+                    if *total > 0 {
+                        (*with_funcs * 100) / *total
+                    } else {
+                        0
+                    }
+                },
+            )
             .map(|(worker_id, (total, with_funcs))| {
-                let percentage = if *total > 0 {
-                    (*with_funcs as f64 / *total as f64) * 100.0
-                } else {
-                    0.0
-                };
+                let percentage =
+                    if *total > 0 { (*with_funcs as f64 / *total as f64) * 100.0 } else { 0.0 };
                 (*worker_id, percentage)
             });
 
-        let has_warnings = busiest.map(|(_, pct)| pct > 50.0).unwrap_or(false);
+        let has_warnings = busiest.is_some_and(|(_, pct)| pct > 50.0);
 
-        Self {
-            has_warnings,
-            busiest_worker: busiest,
-        }
+        Self { has_warnings, busiest_worker: busiest }
     }
 
     pub fn render(&self, f: &mut Frame, area: Rect, _data: &TraceData) {
@@ -59,25 +56,17 @@ impl StatusPanel {
         // Master status indicator
         if self.has_warnings {
             lines.push(Line::from(""));
-            lines.push(Line::from(
-                Span::styled(
-                    "  ⚠️  CAUTION",
-                    Style::default()
-                        .fg(CAUTION_AMBER)
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ));
+            lines.push(Line::from(Span::styled(
+                "  ⚠️  CAUTION",
+                Style::default().fg(CAUTION_AMBER).add_modifier(Modifier::BOLD),
+            )));
             lines.push(Line::from(""));
         } else {
             lines.push(Line::from(""));
-            lines.push(Line::from(
-                Span::styled(
-                    "  ✓  NORMAL",
-                    Style::default()
-                        .fg(HUD_GREEN)
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ));
+            lines.push(Line::from(Span::styled(
+                "  ✓  NORMAL",
+                Style::default().fg(HUD_GREEN).add_modifier(Modifier::BOLD),
+            )));
             lines.push(Line::from(""));
         }
 
@@ -87,26 +76,26 @@ impl StatusPanel {
                 lines.push(Line::from(vec![
                     Span::raw("  Worker "),
                     Span::styled(
-                        format!("{}", worker_id),
+                        format!("{worker_id}"),
                         Style::default().fg(CRITICAL_RED).add_modifier(Modifier::BOLD),
                     ),
                 ]));
                 lines.push(Line::from(vec![
                     Span::raw("  "),
                     Span::styled(
-                        format!("{:.0}% BUSY", percentage),
+                        format!("{percentage:.0}% BUSY"),
                         Style::default().fg(CAUTION_AMBER),
                     ),
                 ]));
             } else {
                 lines.push(Line::from(vec![
                     Span::raw("  Worker "),
-                    Span::styled(format!("{}", worker_id), Style::default().fg(HUD_GREEN)),
+                    Span::styled(format!("{worker_id}"), Style::default().fg(HUD_GREEN)),
                 ]));
                 lines.push(Line::from(vec![
                     Span::raw("  "),
                     Span::styled(
-                        format!("{:.0}% active", percentage),
+                        format!("{percentage:.0}% active"),
                         Style::default().fg(HUD_GREEN),
                     ),
                 ]));
@@ -114,14 +103,9 @@ impl StatusPanel {
         }
 
         let paragraph = Paragraph::new(lines).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("SYSTEM STATUS")
-                .border_style(Style::default().fg(if self.has_warnings {
-                    CAUTION_AMBER
-                } else {
-                    HUD_GREEN
-                })),
+            Block::default().borders(Borders::ALL).title("SYSTEM STATUS").border_style(
+                Style::default().fg(if self.has_warnings { CAUTION_AMBER } else { HUD_GREEN }),
+            ),
         );
 
         f.render_widget(paragraph, area);

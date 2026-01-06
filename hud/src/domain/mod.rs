@@ -5,13 +5,10 @@
 //! - Self-documenting function signatures
 //! - Structured error handling
 
-pub mod types;
 pub mod errors;
+pub mod types;
 
 // Re-export common types for convenience
-pub use types::{
-    WorkerId, Pid, Tid, CpuId, StackId,
-    FunctionName, Timestamp, Duration,
-};
+pub use types::{CpuId, Duration, FunctionName, Pid, StackId, Tid, Timestamp, WorkerId};
 
-pub use errors::{ProfilerError, ExportError, TuiError};
+pub use errors::{ExportError, ProfilerError, TuiError};

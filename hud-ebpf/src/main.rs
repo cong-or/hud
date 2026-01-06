@@ -2,16 +2,15 @@
 #![no_main]
 
 use aya_ebpf::{
+    helpers::{bpf_get_current_pid_tgid, bpf_ktime_get_ns},
     macros::{map, perf_event, tracepoint, uprobe},
     maps::{HashMap, RingBuf, StackTrace},
-    programs::{ProbeContext, PerfEventContext, TracePointContext},
-    helpers::{bpf_ktime_get_ns, bpf_get_current_pid_tgid},
+    programs::{PerfEventContext, ProbeContext, TracePointContext},
     EbpfContext,
 };
 use hud_common::{
-    TaskEvent, ThreadState, WorkerInfo, SchedSwitchArgs, ExecutionSpan,
-    EVENT_BLOCKING_START, EVENT_BLOCKING_END, EVENT_SCHEDULER_DETECTED,
-    TRACE_EXECUTION_START, TRACE_EXECUTION_END,
+    ExecutionSpan, SchedSwitchArgs, TaskEvent, ThreadState, WorkerInfo, EVENT_BLOCKING_END,
+    EVENT_BLOCKING_START, EVENT_SCHEDULER_DETECTED, TRACE_EXECUTION_END, TRACE_EXECUTION_START,
 };
 
 // Ring buffer for sending events to userspace
@@ -76,24 +75,15 @@ pub fn trace_blocking_start_hook(ctx: ProbeContext) -> u32 {
 fn try_trace_blocking_start(ctx: &ProbeContext) -> Result<(), i64> {
     // Get current process/thread info
     let pid_tgid = unsafe { bpf_get_current_pid_tgid() };
-    let pid = (pid_tgid >> 32) as u32;  // Process ID (TGID)
-    let tid = pid_tgid as u32;           // Thread ID (PID)
+    let pid = (pid_tgid >> 32) as u32; // Process ID (TGID)
+    let tid = pid_tgid as u32; // Thread ID (PID)
     let timestamp_ns = unsafe { bpf_ktime_get_ns() };
 
     // Capture stack trace - use BPF_F_USER_STACK (0x100) | BPF_F_FAST_STACK_CMP (0x200)
-    let stack_id = unsafe {
-        STACK_TRACES
-            .get_stackid(ctx, 0x300)
-            .unwrap_or(-1)
-    };
+    let stack_id = unsafe { STACK_TRACES.get_stackid(ctx, 0x300).unwrap_or(-1) };
 
     // Look up current task ID for this thread
-    let task_id = unsafe {
-        THREAD_TASK_MAP
-            .get(&tid)
-            .map(|id| *id)
-            .unwrap_or(0)
-    };
+    let task_id = unsafe { THREAD_TASK_MAP.get(&tid).map(|id| *id).unwrap_or(0) };
 
     // Create event
     let event = TaskEvent {
@@ -102,13 +92,13 @@ fn try_trace_blocking_start(ctx: &ProbeContext) -> Result<(), i64> {
         timestamp_ns,
         event_type: EVENT_BLOCKING_START,
         stack_id,
-        duration_ns: 0,          // Will be calculated in userspace
+        duration_ns: 0, // Will be calculated in userspace
         worker_id: get_worker_id(tid),
         cpu_id: get_cpu_id(),
-        thread_state: 0,         // Not applicable for marker detection
+        thread_state: 0, // Not applicable for marker detection
         task_id,
-        category: 0,             // 0 = general
-        detection_method: 1,     // 1 = marker-based
+        category: 0,         // 0 = general
+        detection_method: 1, // 1 = marker-based
         is_tokio_worker: if is_tokio_worker(tid) { 1 } else { 0 },
         _padding: [0u8; 5],
     };
@@ -131,24 +121,15 @@ pub fn trace_blocking_end_hook(ctx: ProbeContext) -> u32 {
 fn try_trace_blocking_end(ctx: &ProbeContext) -> Result<(), i64> {
     // Get current process/thread info
     let pid_tgid = unsafe { bpf_get_current_pid_tgid() };
-    let pid = (pid_tgid >> 32) as u32;  // Process ID (TGID)
-    let tid = pid_tgid as u32;           // Thread ID (PID)
+    let pid = (pid_tgid >> 32) as u32; // Process ID (TGID)
+    let tid = pid_tgid as u32; // Thread ID (PID)
     let timestamp_ns = unsafe { bpf_ktime_get_ns() };
 
     // Capture stack trace - use BPF_F_USER_STACK (0x100) | BPF_F_FAST_STACK_CMP (0x200)
-    let stack_id = unsafe {
-        STACK_TRACES
-            .get_stackid(ctx, 0x300)
-            .unwrap_or(-1)
-    };
+    let stack_id = unsafe { STACK_TRACES.get_stackid(ctx, 0x300).unwrap_or(-1) };
 
     // Look up current task ID for this thread
-    let task_id = unsafe {
-        THREAD_TASK_MAP
-            .get(&tid)
-            .map(|id| *id)
-            .unwrap_or(0)
-    };
+    let task_id = unsafe { THREAD_TASK_MAP.get(&tid).map(|id| *id).unwrap_or(0) };
 
     // Create event
     let event = TaskEvent {
@@ -157,13 +138,13 @@ fn try_trace_blocking_end(ctx: &ProbeContext) -> Result<(), i64> {
         timestamp_ns,
         event_type: EVENT_BLOCKING_END,
         stack_id,
-        duration_ns: 0,          // Will be calculated in userspace
+        duration_ns: 0, // Will be calculated in userspace
         worker_id: get_worker_id(tid),
         cpu_id: get_cpu_id(),
-        thread_state: 0,         // Not applicable for marker detection
+        thread_state: 0, // Not applicable for marker detection
         task_id,
-        category: 0,             // 0 = general
-        detection_method: 1,     // 1 = marker-based
+        category: 0,         // 0 = general
+        detection_method: 1, // 1 = marker-based
         is_tokio_worker: if is_tokio_worker(tid) { 1 } else { 0 },
         _padding: [0u8; 5],
     };
@@ -195,9 +176,7 @@ fn try_set_task_id(ctx: &ProbeContext) -> Result<(), i64> {
 
     // Store thread → task mapping
     unsafe {
-        THREAD_TASK_MAP
-            .insert(&tid, &task_id, 0)
-            .map_err(|_| 1i64)?;
+        THREAD_TASK_MAP.insert(&tid, &task_id, 0).map_err(|_| 1i64)?;
     }
 
     Ok(())
@@ -246,17 +225,14 @@ fn handle_thread_off_cpu(tid: u32, state: i64, now: u64) -> Result<(), i64> {
             emit_execution_end(tid, now, duration_ns, span.stack_id)?;
 
             // Clear execution span
-            unsafe { EXECUTION_SPANS.remove(&tid)?; }
+            unsafe {
+                EXECUTION_SPANS.remove(&tid)?;
+            }
         }
     }
 
     // Update thread state (for legacy scheduler-based detection)
-    let mut thread_state = unsafe {
-        THREAD_STATE
-            .get(&tid)
-            .map(|s| *s)
-            .unwrap_or_default()
-    };
+    let mut thread_state = unsafe { THREAD_STATE.get(&tid).map(|s| *s).unwrap_or_default() };
 
     thread_state.last_off_cpu_ns = now;
     thread_state.state_when_switched = state;
@@ -277,18 +253,11 @@ fn handle_thread_on_cpu(tid: u32, now: u64, ctx: &TracePointContext) -> Result<(
 
     // Phase 3+: Track execution span and emit start event
     // Use BPF_F_USER_STACK (0x100) | BPF_F_FAST_STACK_CMP (0x200) for better unwinding
-    let stack_id = unsafe {
-        STACK_TRACES.get_stackid(ctx, 0x300).unwrap_or(-1)
-    };
+    let stack_id = unsafe { STACK_TRACES.get_stackid(ctx, 0x300).unwrap_or(-1) };
     let cpu_id = get_cpu_id();
 
     // Create execution span
-    let span = ExecutionSpan {
-        start_time_ns: now,
-        stack_id,
-        cpu_id,
-        _padding: [0; 4],
-    };
+    let span = ExecutionSpan { start_time_ns: now, stack_id, cpu_id, _padding: [0; 4] };
 
     unsafe {
         EXECUTION_SPANS.insert(&tid, &span, 0)?;
@@ -298,12 +267,7 @@ fn handle_thread_on_cpu(tid: u32, now: u64, ctx: &TracePointContext) -> Result<(
     emit_execution_start(tid, now, stack_id)?;
 
     // Get thread state (for legacy scheduler-based detection)
-    let mut thread_state = unsafe {
-        THREAD_STATE
-            .get(&tid)
-            .map(|s| *s)
-            .unwrap_or_default()
-    };
+    let mut thread_state = unsafe { THREAD_STATE.get(&tid).map(|s| *s).unwrap_or_default() };
 
     // Calculate how long thread was OFF CPU
     if thread_state.last_off_cpu_ns > 0 {
@@ -315,16 +279,12 @@ fn handle_thread_on_cpu(tid: u32, now: u64, ctx: &TracePointContext) -> Result<(
         // Only report CPU-bound blocking (TASK_RUNNING state)
         // This filters out async yields and I/O waits (TASK_INTERRUPTIBLE)
         // When scheduler preempts a CPU-bound task, state = TASK_RUNNING (0)
-        if thread_state.off_cpu_duration > threshold_ns
-            && thread_state.state_when_switched == 0 {  // TASK_RUNNING only
+        if thread_state.off_cpu_duration > threshold_ns && thread_state.state_when_switched == 0 {
+            // TASK_RUNNING only
 
-            let task_id = unsafe {
-                THREAD_TASK_MAP.get(&tid).map(|id| *id).unwrap_or(0)
-            };
+            let task_id = unsafe { THREAD_TASK_MAP.get(&tid).map(|id| *id).unwrap_or(0) };
 
-            let stack_id = unsafe {
-                STACK_TRACES.get_stackid(ctx, 0x300).unwrap_or(-1)
-            };
+            let stack_id = unsafe { STACK_TRACES.get_stackid(ctx, 0x300).unwrap_or(-1) };
 
             report_scheduler_blocking(
                 tid,
@@ -347,9 +307,7 @@ fn handle_thread_on_cpu(tid: u32, now: u64, ctx: &TracePointContext) -> Result<(
 
 fn get_threshold_ns() -> u64 {
     // Default to 5_000_000 ns (5ms)
-    unsafe {
-        CONFIG.get(&0).map(|v| *v).unwrap_or(5_000_000)
-    }
+    unsafe { CONFIG.get(&0).map(|v| *v).unwrap_or(5_000_000) }
 }
 
 fn report_scheduler_blocking(
@@ -373,9 +331,9 @@ fn report_scheduler_blocking(
         cpu_id: get_cpu_id(),
         thread_state,
         task_id,
-        category: 0,          // 0 = general
-        detection_method: 2,  // 2 = scheduler-based
-        is_tokio_worker: 1,   // Only workers trigger scheduler detection
+        category: 0,         // 0 = general
+        detection_method: 2, // 2 = scheduler-based
+        is_tokio_worker: 1,  // Only workers trigger scheduler detection
         _padding: [0u8; 5],
     };
 
@@ -391,9 +349,7 @@ fn emit_execution_start(tid: u32, timestamp_ns: u64, stack_id: i64) -> Result<()
     let pid_tgid = unsafe { bpf_get_current_pid_tgid() };
     let pid = (pid_tgid >> 32) as u32;
 
-    let task_id = unsafe {
-        THREAD_TASK_MAP.get(&tid).map(|id| *id).unwrap_or(0)
-    };
+    let task_id = unsafe { THREAD_TASK_MAP.get(&tid).map(|id| *id).unwrap_or(0) };
 
     let event = TaskEvent {
         pid,
@@ -401,13 +357,13 @@ fn emit_execution_start(tid: u32, timestamp_ns: u64, stack_id: i64) -> Result<()
         timestamp_ns,
         event_type: TRACE_EXECUTION_START,
         stack_id,
-        duration_ns: 0,  // Not applicable for start event
+        duration_ns: 0, // Not applicable for start event
         worker_id: get_worker_id(tid),
         cpu_id: get_cpu_id(),
         thread_state: 0,
         task_id,
-        category: 0,             // 0 = general
-        detection_method: 3,     // 3 = trace
+        category: 0,         // 0 = general
+        detection_method: 3, // 3 = trace
         is_tokio_worker: 1,
         _padding: [0u8; 5],
     };
@@ -429,9 +385,7 @@ fn emit_execution_end(
     let pid_tgid = unsafe { bpf_get_current_pid_tgid() };
     let pid = (pid_tgid >> 32) as u32;
 
-    let task_id = unsafe {
-        THREAD_TASK_MAP.get(&tid).map(|id| *id).unwrap_or(0)
-    };
+    let task_id = unsafe { THREAD_TASK_MAP.get(&tid).map(|id| *id).unwrap_or(0) };
 
     let event = TaskEvent {
         pid,
@@ -444,8 +398,8 @@ fn emit_execution_end(
         cpu_id: get_cpu_id(),
         thread_state: 0,
         task_id,
-        category: 0,             // 0 = general
-        detection_method: 3,     // 3 = trace
+        category: 0,         // 0 = general
+        detection_method: 3, // 3 = trace
         is_tokio_worker: 1,
         _padding: [0u8; 5],
     };
@@ -459,12 +413,7 @@ fn emit_execution_end(
 
 // Helper: Get worker ID for a TID (or u32::MAX if not a worker)
 fn get_worker_id(tid: u32) -> u32 {
-    unsafe {
-        TOKIO_WORKER_THREADS
-            .get(&tid)
-            .map(|info| info.worker_id)
-            .unwrap_or(u32::MAX)
-    }
+    unsafe { TOKIO_WORKER_THREADS.get(&tid).map(|info| info.worker_id).unwrap_or(u32::MAX) }
 }
 
 // Helper: Check if TID is a Tokio worker
@@ -505,9 +454,7 @@ fn try_on_cpu_sample(ctx: &PerfEventContext) -> Result<(), i64> {
 
     // Filter by target PID (since we're using AllProcessesOneCpu scope)
     // CONFIG[1] contains the target PID set by userspace
-    let target_pid = unsafe {
-        CONFIG.get(&1).map(|v| *v as u32).unwrap_or(0)
-    };
+    let target_pid = unsafe { CONFIG.get(&1).map(|v| *v as u32).unwrap_or(0) };
     if target_pid != 0 && pid != target_pid {
         return Ok(());
     }
@@ -529,17 +476,13 @@ fn try_on_cpu_sample(ctx: &PerfEventContext) -> Result<(), i64> {
 
     // Capture stack trace - perf_event context has pt_regs, so this should work!
     // Use BPF_F_USER_STACK (0x100) | BPF_F_FAST_STACK_CMP (0x200)
-    let stack_id = unsafe {
-        STACK_TRACES.get_stackid(ctx, 0x300).unwrap_or(-1)
-    };
+    let stack_id = unsafe { STACK_TRACES.get_stackid(ctx, 0x300).unwrap_or(-1) };
 
     let worker_id = get_worker_id(tid);
     let cpu_id = get_cpu_id();
 
     // Get current task ID if available
-    let task_id = unsafe {
-        THREAD_TASK_MAP.get(&tid).map(|id| *id).unwrap_or(0)
-    };
+    let task_id = unsafe { THREAD_TASK_MAP.get(&tid).map(|id| *id).unwrap_or(0) };
 
     // Emit a sample event
     // We'll use TRACE_EXECUTION_START with a special marker to indicate it's a sample
@@ -549,20 +492,18 @@ fn try_on_cpu_sample(ctx: &PerfEventContext) -> Result<(), i64> {
         timestamp_ns,
         event_type: TRACE_EXECUTION_START,
         stack_id,
-        duration_ns: 0,  // Samples don't have duration
+        duration_ns: 0, // Samples don't have duration
         worker_id,
         cpu_id,
         thread_state: 0,
         task_id,
         category: 0,
-        detection_method: 4,  // 4 = perf_event sampling
+        detection_method: 4, // 4 = perf_event sampling
         is_tokio_worker: 1,
         _padding: [0u8; 5],
     };
 
-    let output_result = unsafe {
-        EVENTS.output(&event, 0)
-    };
+    let output_result = unsafe { EVENTS.output(&event, 0) };
 
     // DEBUG: Track event output success/failure
     unsafe {

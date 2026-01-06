@@ -18,12 +18,15 @@ pub struct WorkerInfo {
 /// Identify Tokio worker threads by reading /proc/pid/task/*/comm
 ///
 /// Finds threads with names starting with "tokio-runtime-w"
+///
+/// # Errors
+/// Returns an error if /proc filesystem cannot be accessed or read
+#[allow(clippy::cast_possible_truncation)]
 pub fn identify_tokio_workers(pid: Pid) -> Result<Vec<WorkerInfo>> {
     let task_dir = format!("/proc/{}/task", pid.0);
     let mut workers = Vec::new();
 
-    let entries = fs::read_dir(&task_dir)
-        .context(format!("Failed to read {}", task_dir))?;
+    let entries = fs::read_dir(&task_dir).context(format!("Failed to read {task_dir}"))?;
 
     for entry in entries {
         let entry = entry?;
@@ -35,7 +38,7 @@ pub fn identify_tokio_workers(pid: Pid) -> Result<Vec<WorkerInfo>> {
             if let Ok(comm) = fs::read_to_string(comm_path) {
                 let comm = comm.trim();
                 if comm.starts_with("tokio-runtime-w") {
-                    log::info!("Found Tokio worker thread: TID {} ({})", tid, comm);
+                    log::info!("Found Tokio worker thread: TID {tid} ({comm})");
                     workers.push(WorkerInfo {
                         tid: Tid(tid),
                         worker_id: workers.len() as u32, // 0-indexed
@@ -57,7 +60,8 @@ mod tests {
     fn test_identify_workers_self_process() {
         // Try to identify workers in the test process itself
         // This should return empty since the test doesn't run a Tokio runtime
-        let pid = Pid(std::process::id());
+        #[allow(clippy::cast_possible_wrap)]
+        let pid = Pid(std::process::id() as i32);
         let result = identify_tokio_workers(pid);
 
         // Should succeed (no error), but find no workers
@@ -69,7 +73,7 @@ mod tests {
     #[test]
     fn test_identify_workers_invalid_pid() {
         // Invalid PID should return an error
-        let result = identify_tokio_workers(Pid(9999999));
+        let result = identify_tokio_workers(Pid(9_999_999));
         assert!(result.is_err());
     }
 }

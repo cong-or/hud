@@ -11,6 +11,9 @@ use crate::domain::CpuId;
 ///
 /// Returns a vector of CPU IDs (e.g., [0, 1, 2, 3] for a 4-core system).
 /// The format in /sys is like "0-3" or "0-3,8-11" for NUMA systems.
+///
+/// # Errors
+/// Returns an error if /sys/devices/system/cpu/online cannot be read or parsed
 pub fn online_cpus() -> Result<Vec<CpuId>> {
     let content = fs::read_to_string("/sys/devices/system/cpu/online")
         .context("Failed to read /sys/devices/system/cpu/online")?;

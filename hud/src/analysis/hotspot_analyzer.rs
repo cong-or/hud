@@ -2,8 +2,11 @@
 //!
 //! Aggregates trace events by function name to identify performance hotspots
 
+// Percentage calculations intentionally convert usize to f64
+#![allow(clippy::cast_precision_loss)]
+
+use crate::trace_data::TraceData;
 use std::collections::HashMap;
-use crate::trace_data::{TraceData, TraceEvent};
 
 /// A function hotspot with aggregated statistics
 #[derive(Debug, Clone)]
@@ -16,6 +19,9 @@ pub struct FunctionHotspot {
     pub line: Option<u32>,
 }
 
+/// Aggregated function data: (worker counts, file, line)
+type FunctionData = (HashMap<u32, usize>, Option<String>, Option<u32>);
+
 /// Analyze trace data to identify function hotspots
 ///
 /// This function aggregates trace events by function name, counts occurrences,
@@ -26,15 +32,14 @@ pub struct FunctionHotspot {
 ///
 /// # Returns
 /// A vector of function hotspots sorted by count (most frequent first)
-pub fn analyze_hotspots(data: &TraceData) -> Vec<FunctionHotspot> {
+#[must_use] pub fn analyze_hotspots(data: &TraceData) -> Vec<FunctionHotspot> {
     // Aggregate events by function name, capturing file/line from first occurrence
-    let mut function_data: HashMap<String, (HashMap<u32, usize>, Option<String>, Option<u32>)> =
-        HashMap::new();
+    let mut function_data: HashMap<String, FunctionData> = HashMap::new();
 
     for event in &data.events {
-        let entry = function_data.entry(event.name.clone()).or_insert_with(|| {
-            (HashMap::new(), event.file.clone(), event.line)
-        });
+        let entry = function_data
+            .entry(event.name.clone())
+            .or_insert_with(|| (HashMap::new(), event.file.clone(), event.line));
         *entry.0.entry(event.worker_id).or_insert(0) += 1;
     }
 
@@ -45,14 +50,7 @@ pub fn analyze_hotspots(data: &TraceData) -> Vec<FunctionHotspot> {
         .map(|(name, (workers, file, line))| {
             let count: usize = workers.values().sum();
             let percentage = (count as f64 / total_samples as f64) * 100.0;
-            FunctionHotspot {
-                name,
-                count,
-                percentage,
-                workers,
-                file,
-                line,
-            }
+            FunctionHotspot { name, count, percentage, workers, file, line }
         })
         .collect();
 

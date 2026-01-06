@@ -13,6 +13,7 @@ fn test_parse_trace_from_file_succeeds() {
 }
 
 #[test]
+#[allow(clippy::float_cmp)]
 fn test_parse_trace_extracts_all_fields() {
     let trace_path = "tests/fixtures/simple_trace.json";
     let data = TraceData::from_file(trace_path).unwrap();
@@ -42,6 +43,7 @@ fn test_parse_trace_handles_missing_optional_fields() {
 }
 
 #[test]
+#[allow(clippy::float_cmp)]
 fn test_parse_trace_calculates_duration() {
     let trace_path = "tests/fixtures/simple_trace.json";
     let data = TraceData::from_file(trace_path).unwrap();

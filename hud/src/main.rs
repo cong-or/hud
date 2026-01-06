@@ -1,27 +1,29 @@
+// Main function is intentionally long for clarity; time conversions lose precision for display
+#![allow(clippy::too_many_lines, clippy::cast_precision_loss, clippy::cast_lossless)]
+
 use anyhow::{Context, Result};
 use aya::maps::{RingBuf, StackTraceMap};
 use clap::Parser;
-use crossbeam_channel::{bounded, Sender};
-use log::{info, warn};
+use crossbeam_channel::bounded;
+use hud::export::ChromeTraceExporter;
+use hud::symbolization::{parse_memory_maps, Symbolizer};
 use hud_common::{
-    TaskEvent,
-    EVENT_BLOCKING_END, EVENT_BLOCKING_START, EVENT_SCHEDULER_DETECTED,
-    TRACE_EXECUTION_START, TRACE_EXECUTION_END,
+    TaskEvent, EVENT_BLOCKING_END, EVENT_BLOCKING_START, EVENT_SCHEDULER_DETECTED,
+    TRACE_EXECUTION_END, TRACE_EXECUTION_START,
 };
+use log::{info, warn};
 use std::fs::File;
 use std::io::BufWriter;
 use std::time::{Duration, Instant};
-use hud::export::ChromeTraceExporter;
-use hud::symbolization::{parse_memory_maps, Symbolizer};
 
 // Import modules
 use hud::cli::Args;
 use hud::domain::StackId;
 use hud::profiling::{
-    attach_blocking_uprobes, init_ebpf_logger, load_ebpf_program,
-    print_perf_event_diagnostics, setup_scheduler_detection, StackResolver,
-    DetectionStats, display_blocking_start, display_blocking_end, display_blocking_end_no_start,
-    display_scheduler_detected, display_execution_event, display_statistics, display_progress,
+    attach_blocking_uprobes, display_blocking_end, display_blocking_end_no_start,
+    display_blocking_start, display_execution_event, display_scheduler_detected,
+    display_statistics, init_ebpf_logger, load_ebpf_program, print_perf_event_diagnostics,
+    setup_scheduler_detection, DetectionStats, StackResolver,
 };
 use hud::trace_data::{TraceData, TraceEvent};
 use hud::tui::{self, App};
@@ -50,18 +52,20 @@ async fn main() -> Result<()> {
     println!("   F-35 inspired profiler for async Rust\n");
 
     // Determine target binary and make it absolute
-    let target_path = args.target.ok_or_else(|| anyhow::anyhow!(
-        "Missing required argument: --target\n\nSpecify the binary path for symbol resolution"
-    ))?;
+    let target_path = args.target.ok_or_else(|| {
+        anyhow::anyhow!(
+            "Missing required argument: --target\n\nSpecify the binary path for symbol resolution"
+        )
+    })?;
 
     // Convert to absolute path
     let target_path = std::fs::canonicalize(&target_path)
-        .context(format!("Failed to resolve path: {}", target_path))?
+        .context(format!("Failed to resolve path: {target_path}"))?
         .to_string_lossy()
         .to_string();
 
-    println!("📦 Target: {}", target_path);
-    println!("📊 PID: {}", pid);
+    println!("📦 Target: {target_path}");
+    println!("📊 PID: {pid}");
 
     // Load the eBPF program
     let mut bpf = load_ebpf_program()?;
@@ -78,7 +82,7 @@ async fn main() -> Result<()> {
 
     // Setup scheduler-based detection
     let worker_count = setup_scheduler_detection(&mut bpf, pid)?;
-    println!("   Workers: {}", worker_count);
+    println!("   Workers: {worker_count}");
     println!("   Detection: sched_switch (5ms threshold) + perf_event (99Hz)");
 
     // Get memory range for PIE address resolution
@@ -88,14 +92,13 @@ async fn main() -> Result<()> {
             Some(range)
         }
         Err(e) => {
-            warn!("Failed to get memory range: {}. Symbol resolution may not work.", e);
+            warn!("Failed to get memory range: {e}. Symbol resolution may not work.");
             None
         }
     };
 
     // Create symbolizer for resolving stack traces
-    let symbolizer = Symbolizer::new(&target_path)
-        .context("Failed to create symbolizer")?;
+    let symbolizer = Symbolizer::new(&target_path).context("Failed to create symbolizer")?;
 
     // Create stack resolver
     let stack_resolver = StackResolver::new(&symbolizer, memory_range);
@@ -114,21 +117,19 @@ async fn main() -> Result<()> {
     }
 
     // Launch TUI in separate thread if not headless
-    let (tui_handle, event_tx) = if !args.headless {
+    let (tui_handle, event_tx) = if args.headless {
+        println!("\n📊 Headless mode - collecting data...\n");
+        (None, None)
+    } else {
         println!("\n🎯 Launching live HUD...\n");
 
         let (event_tx, event_rx) = bounded(1000);
 
         // Spawn TUI thread
         let tui_pid = Some(pid);
-        let handle = std::thread::spawn(move || {
-            tui::run_live(event_rx, tui_pid)
-        });
+        let handle = std::thread::spawn(move || tui::run_live(event_rx, tui_pid));
 
         (Some(handle), Some(event_tx))
-    } else {
-        println!("\n📊 Headless mode - collecting data...\n");
-        (None, None)
     };
 
     // Get the ring buffer
@@ -136,7 +137,7 @@ async fn main() -> Result<()> {
 
     // Get the stack trace map
     let stack_traces: StackTraceMap<_> = StackTraceMap::try_from(
-        bpf.take_map("STACK_TRACES").context("stack trace map not found")?
+        bpf.take_map("STACK_TRACES").context("stack trace map not found")?,
     )?;
 
     // Track blocking durations and stack IDs (for marker detection)
@@ -155,11 +156,8 @@ async fn main() -> Result<()> {
 
     // Track start time for duration limit
     let profiling_start = Instant::now();
-    let duration_limit = if args.duration > 0 {
-        Some(Duration::from_secs(args.duration))
-    } else {
-        None
-    };
+    let duration_limit =
+        if args.duration > 0 { Some(Duration::from_secs(args.duration)) } else { None };
 
     // Main event processing loop
     loop {
@@ -167,7 +165,7 @@ async fn main() -> Result<()> {
         if let Some(limit) = duration_limit {
             if profiling_start.elapsed() >= limit {
                 println!("\n\n✓ Duration limit reached ({}s), shutting down", args.duration);
-                println!("  Processed {} events", event_count);
+                println!("  Processed {event_count} events");
                 break;
             }
         }
@@ -188,7 +186,9 @@ async fn main() -> Result<()> {
             }
 
             // Parse the event
-            let event = unsafe { std::ptr::read_unaligned(bytes.as_ptr() as *const TaskEvent) };
+            // SAFETY: We verified the buffer size matches TaskEvent, and the eBPF program writes valid TaskEvent data
+            #[allow(unsafe_code)]
+            let event = unsafe { std::ptr::read_unaligned(bytes.as_ptr().cast::<TaskEvent>()) };
 
             match event.event_type {
                 EVENT_BLOCKING_START => {
@@ -228,10 +228,8 @@ async fn main() -> Result<()> {
                 }
                 TRACE_EXECUTION_START | TRACE_EXECUTION_END => {
                     // Get the top frame address for symbol resolution
-                    let top_frame_addr = StackResolver::get_top_frame_addr(
-                        StackId(event.stack_id),
-                        &stack_traces,
-                    );
+                    let top_frame_addr =
+                        StackResolver::get_top_frame_addr(StackId(event.stack_id), &stack_traces);
 
                     // Add to trace exporter if enabled
                     if let Some(ref mut exporter) = trace_exporter {
@@ -258,11 +256,12 @@ async fn main() -> Result<()> {
                                 let resolved = symbolizer.resolve(file_offset);
                                 if let Some(frame) = resolved.frames.first() {
                                     let func = frame.function.clone();
-                                    let file_path = frame.location.as_ref().and_then(|loc| loc.file.clone());
+                                    let file_path =
+                                        frame.location.as_ref().and_then(|loc| loc.file.clone());
                                     let line_num = frame.location.as_ref().and_then(|loc| loc.line);
                                     (func, file_path, line_num)
                                 } else {
-                                    (format!("0x{:x}", addr), None, None)
+                                    (format!("0x{addr:x}"), None, None)
                                 }
                             } else {
                                 ("execution".to_string(), None, None)
@@ -274,7 +273,7 @@ async fn main() -> Result<()> {
                                 tid: event.tid,
                                 timestamp: event.timestamp_ns as f64 / 1_000_000.0, // ns to seconds
                                 cpu: event.cpu_id,
-                                detection_method: Some(event.detection_method as u32),
+                                detection_method: Some(u32::from(event.detection_method)),
                                 file,
                                 line,
                             };
@@ -304,12 +303,12 @@ async fn main() -> Result<()> {
 
         // Use select to handle both sleep and Ctrl+C
         tokio::select! {
-            _ = tokio::time::sleep(Duration::from_millis(100)) => {
+            () = tokio::time::sleep(Duration::from_millis(100)) => {
                 // Continue loop
             }
             _ = &mut ctrl_c => {
                 println!("\n\n✓ Received Ctrl+C, shutting down gracefully");
-                println!("  Processed {} events", event_count);
+                println!("  Processed {event_count} events");
                 break;
             }
         }
@@ -330,11 +329,9 @@ async fn main() -> Result<()> {
         println!("\n📝 Exporting trace...");
         println!("   Events: {}", exporter.event_count());
 
-        let file = File::create(&export_path)
-            .context("Failed to create trace output file")?;
+        let file = File::create(&export_path).context("Failed to create trace output file")?;
         let writer = BufWriter::new(file);
-        exporter.export(writer)
-            .context("Failed to export trace")?;
+        exporter.export(writer).context("Failed to export trace")?;
 
         println!("   ✓ Saved to: {}", export_path.display());
         println!("\n💡 To replay:");

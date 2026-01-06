@@ -24,3 +24,11 @@ opt-level = 3
 codegen-units = 1
 # Enable debug symbols for stack trace resolution
 debug = true
+
+[workspace.lints.clippy]
+all = "warn"
+pedantic = "warn"
+
+[workspace.lints.rust]
+unsafe_code = "warn"
+unused_imports = "warn"
