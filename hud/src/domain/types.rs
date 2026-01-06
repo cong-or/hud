@@ -235,7 +235,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "PID must be non-negative")]
     fn test_negative_pid_panics() {
-        Pid::new(-1);
+        let _ = Pid::new(-1);
     }
 
     #[test]
@@ -248,7 +248,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "Cannot convert invalid StackId")]
     fn test_invalid_stack_id_panics() {
-        StackId(-1).as_map_key();
+        let _ = StackId(-1).as_map_key();
     }
 
     #[test]

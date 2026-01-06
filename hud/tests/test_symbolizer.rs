@@ -84,7 +84,7 @@ fn test_symbolizer_resolves_function_names() {
 }
 
 #[test]
-#[ignore] // Only run if you want to verify full debug info is available
+#[ignore = "Only run if you want to verify full debug info is available"]
 fn test_dwarf_debug_info_available() {
     // This test verifies that DWARF debug info with file:line is available
     // It's ignored by default because it depends on build configuration

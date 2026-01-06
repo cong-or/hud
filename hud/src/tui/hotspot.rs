@@ -5,7 +5,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
     Frame,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use super::{CAUTION_AMBER, CRITICAL_RED, HUD_GREEN, INFO_DIM};
 use crate::analysis::{analyze_hotspots, FunctionHotspot};

@@ -51,28 +51,32 @@ use tokio::time::sleep;
 //
 // These markers will be removed in Phase 3c!
 
+#[allow(unsafe_code)]
 #[no_mangle]
 #[inline(never)]
-fn trace_task_start(task_id: u64) {
+extern "C" fn trace_task_start(task_id: u64) {
     // Empty - just a hook point for eBPF
     std::hint::black_box(task_id);
 }
 
+#[allow(unsafe_code)]
 #[no_mangle]
 #[inline(never)]
-fn trace_task_end(task_id: u64) {
+extern "C" fn trace_task_end(task_id: u64) {
     std::hint::black_box(task_id);
 }
 
+#[allow(unsafe_code)]
 #[no_mangle]
 #[inline(never)]
-fn trace_blocking_start() {
+extern "C" fn trace_blocking_start() {
     std::hint::black_box(());
 }
 
+#[allow(unsafe_code)]
 #[no_mangle]
 #[inline(never)]
-fn trace_blocking_end() {
+extern "C" fn trace_blocking_end() {
     std::hint::black_box(());
 }
 

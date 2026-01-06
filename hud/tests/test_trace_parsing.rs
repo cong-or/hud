@@ -112,10 +112,14 @@ fn test_parse_empty_trace_events() {
 
     assert_eq!(data.events.len(), 0);
     assert_eq!(data.workers.len(), 0);
-    assert_eq!(data.duration, 0.0);
+    #[allow(clippy::float_cmp)]
+    {
+        assert_eq!(data.duration, 0.0);
+    }
 }
 
 #[test]
+#[allow(clippy::float_cmp)]
 fn test_timestamp_conversion_microseconds_to_seconds() {
     let trace_path = "tests/fixtures/simple_trace.json";
     let data = TraceData::from_file(trace_path).unwrap();

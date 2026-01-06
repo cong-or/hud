@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+#![allow(unused_unsafe)]
 
 use aya_ebpf::{
     helpers::{bpf_get_current_pid_tgid, bpf_ktime_get_ns},
@@ -83,7 +84,7 @@ fn try_trace_blocking_start(ctx: &ProbeContext) -> Result<(), i64> {
     let stack_id = unsafe { STACK_TRACES.get_stackid(ctx, 0x300).unwrap_or(-1) };
 
     // Look up current task ID for this thread
-    let task_id = unsafe { THREAD_TASK_MAP.get(&tid).map(|id| *id).unwrap_or(0) };
+    let task_id = unsafe { THREAD_TASK_MAP.get(&tid).copied().unwrap_or(0) };
 
     // Create event
     let event = TaskEvent {
@@ -129,7 +130,7 @@ fn try_trace_blocking_end(ctx: &ProbeContext) -> Result<(), i64> {
     let stack_id = unsafe { STACK_TRACES.get_stackid(ctx, 0x300).unwrap_or(-1) };
 
     // Look up current task ID for this thread
-    let task_id = unsafe { THREAD_TASK_MAP.get(&tid).map(|id| *id).unwrap_or(0) };
+    let task_id = unsafe { THREAD_TASK_MAP.get(&tid).copied().unwrap_or(0) };
 
     // Create event
     let event = TaskEvent {
@@ -215,7 +216,7 @@ fn handle_thread_off_cpu(tid: u32, state: i64, now: u64) -> Result<(), i64> {
     // Phase 3+: Emit execution end event for Tokio workers
     if is_tokio_worker(tid) {
         // Get execution span if it exists
-        let span = unsafe { EXECUTION_SPANS.get(&tid).map(|s| *s) };
+        let span = unsafe { EXECUTION_SPANS.get(&tid).copied() };
 
         if let Some(span) = span {
             // Calculate execution duration
@@ -232,7 +233,7 @@ fn handle_thread_off_cpu(tid: u32, state: i64, now: u64) -> Result<(), i64> {
     }
 
     // Update thread state (for legacy scheduler-based detection)
-    let mut thread_state = unsafe { THREAD_STATE.get(&tid).map(|s| *s).unwrap_or_default() };
+    let mut thread_state = unsafe { THREAD_STATE.get(&tid).copied().unwrap_or_default() };
 
     thread_state.last_off_cpu_ns = now;
     thread_state.state_when_switched = state;
@@ -267,7 +268,7 @@ fn handle_thread_on_cpu(tid: u32, now: u64, ctx: &TracePointContext) -> Result<(
     emit_execution_start(tid, now, stack_id)?;
 
     // Get thread state (for legacy scheduler-based detection)
-    let mut thread_state = unsafe { THREAD_STATE.get(&tid).map(|s| *s).unwrap_or_default() };
+    let mut thread_state = unsafe { THREAD_STATE.get(&tid).copied().unwrap_or_default() };
 
     // Calculate how long thread was OFF CPU
     if thread_state.last_off_cpu_ns > 0 {
@@ -282,7 +283,7 @@ fn handle_thread_on_cpu(tid: u32, now: u64, ctx: &TracePointContext) -> Result<(
         if thread_state.off_cpu_duration > threshold_ns && thread_state.state_when_switched == 0 {
             // TASK_RUNNING only
 
-            let task_id = unsafe { THREAD_TASK_MAP.get(&tid).map(|id| *id).unwrap_or(0) };
+            let task_id = unsafe { THREAD_TASK_MAP.get(&tid).copied().unwrap_or(0) };
 
             let stack_id = unsafe { STACK_TRACES.get_stackid(ctx, 0x300).unwrap_or(-1) };
 
@@ -307,7 +308,7 @@ fn handle_thread_on_cpu(tid: u32, now: u64, ctx: &TracePointContext) -> Result<(
 
 fn get_threshold_ns() -> u64 {
     // Default to 5_000_000 ns (5ms)
-    unsafe { CONFIG.get(&0).map(|v| *v).unwrap_or(5_000_000) }
+    unsafe { CONFIG.get(&0).copied().unwrap_or(5_000_000) }
 }
 
 fn report_scheduler_blocking(
@@ -349,7 +350,7 @@ fn emit_execution_start(tid: u32, timestamp_ns: u64, stack_id: i64) -> Result<()
     let pid_tgid = unsafe { bpf_get_current_pid_tgid() };
     let pid = (pid_tgid >> 32) as u32;
 
-    let task_id = unsafe { THREAD_TASK_MAP.get(&tid).map(|id| *id).unwrap_or(0) };
+    let task_id = unsafe { THREAD_TASK_MAP.get(&tid).copied().unwrap_or(0) };
 
     let event = TaskEvent {
         pid,
@@ -385,7 +386,7 @@ fn emit_execution_end(
     let pid_tgid = unsafe { bpf_get_current_pid_tgid() };
     let pid = (pid_tgid >> 32) as u32;
 
-    let task_id = unsafe { THREAD_TASK_MAP.get(&tid).map(|id| *id).unwrap_or(0) };
+    let task_id = unsafe { THREAD_TASK_MAP.get(&tid).copied().unwrap_or(0) };
 
     let event = TaskEvent {
         pid,
@@ -443,7 +444,7 @@ fn try_on_cpu_sample(ctx: &PerfEventContext) -> Result<(), i64> {
     // DEBUG: Increment counter to verify perf_event is being called
     unsafe {
         let key = 0u32;
-        let current = PERF_EVENT_COUNTER.get(&key).map(|v| *v).unwrap_or(0);
+        let current = PERF_EVENT_COUNTER.get(&key).copied().unwrap_or(0);
         let _ = PERF_EVENT_COUNTER.insert(&key, &(current + 1), 0);
     }
 
@@ -462,7 +463,7 @@ fn try_on_cpu_sample(ctx: &PerfEventContext) -> Result<(), i64> {
     // DEBUG: Track how many events pass PID filter
     unsafe {
         let key = 0u32;
-        let current = PERF_EVENT_PASSED_PID_FILTER.get(&key).map(|v| *v).unwrap_or(0);
+        let current = PERF_EVENT_PASSED_PID_FILTER.get(&key).copied().unwrap_or(0);
         let _ = PERF_EVENT_PASSED_PID_FILTER.insert(&key, &(current + 1), 0);
     }
 
@@ -482,7 +483,7 @@ fn try_on_cpu_sample(ctx: &PerfEventContext) -> Result<(), i64> {
     let cpu_id = get_cpu_id();
 
     // Get current task ID if available
-    let task_id = unsafe { THREAD_TASK_MAP.get(&tid).map(|id| *id).unwrap_or(0) };
+    let task_id = unsafe { THREAD_TASK_MAP.get(&tid).copied().unwrap_or(0) };
 
     // Emit a sample event
     // We'll use TRACE_EXECUTION_START with a special marker to indicate it's a sample
@@ -509,10 +510,10 @@ fn try_on_cpu_sample(ctx: &PerfEventContext) -> Result<(), i64> {
     unsafe {
         let key = 0u32;
         if output_result.is_ok() {
-            let current = PERF_EVENT_OUTPUT_SUCCESS.get(&key).map(|v| *v).unwrap_or(0);
+            let current = PERF_EVENT_OUTPUT_SUCCESS.get(&key).copied().unwrap_or(0);
             let _ = PERF_EVENT_OUTPUT_SUCCESS.insert(&key, &(current + 1), 0);
         } else {
-            let current = PERF_EVENT_OUTPUT_FAILED.get(&key).map(|v| *v).unwrap_or(0);
+            let current = PERF_EVENT_OUTPUT_FAILED.get(&key).copied().unwrap_or(0);
             let _ = PERF_EVENT_OUTPUT_FAILED.insert(&key, &(current + 1), 0);
         }
     }
@@ -521,6 +522,7 @@ fn try_on_cpu_sample(ctx: &PerfEventContext) -> Result<(), i64> {
     Ok(())
 }
 
+#[cfg(all(not(test), target_os = "none"))]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     unsafe { core::hint::unreachable_unchecked() }

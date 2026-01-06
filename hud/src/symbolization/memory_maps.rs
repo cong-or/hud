@@ -97,7 +97,7 @@ mod tests {
     #[test]
     fn test_parse_memory_maps_self() {
         // Test parsing our own process's memory maps
-        let pid = std::process::id() as i32;
+        let pid = i32::try_from(std::process::id()).expect("PID exceeds i32::MAX");
 
         // Try to find the current executable
         let exe = std::env::current_exe().expect("Failed to get current exe");

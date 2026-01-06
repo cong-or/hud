@@ -61,7 +61,7 @@ async fn well_behaved_task(id: u32) {
 async fn blocking_task() {
     println!("  ⚠️  Blocking task starting");
 
-    for round in 0..5 {
+    for _round in 0..5 {
         sleep(Duration::from_secs(1)).await;
 
         println!("\n  🔴 BLOCKING for 450ms (EVERYTHING will freeze!)");
