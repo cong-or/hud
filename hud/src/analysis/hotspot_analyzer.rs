@@ -37,7 +37,7 @@ pub fn analyze_hotspots(data: &TraceData) -> Vec<FunctionHotspot> {
     // Aggregate events by function name, capturing file/line from first occurrence
     let mut function_data: HashMap<String, FunctionData> = HashMap::new();
 
-    for event in &data.events {
+    for event in data.events.iter() {
         let entry = function_data
             .entry(event.name.clone())
             .or_insert_with(|| (HashMap::new(), event.file.clone(), event.line));
@@ -67,8 +67,10 @@ mod tests {
     use crate::trace_data::TraceEvent;
 
     fn create_test_data() -> TraceData {
+        use std::sync::Arc;
+
         TraceData {
-            events: vec![
+            events: Arc::new(vec![
                 TraceEvent {
                     name: "function_a".to_string(),
                     worker_id: 0,
@@ -99,8 +101,8 @@ mod tests {
                     file: Some("src/b.rs".to_string()),
                     line: Some(20),
                 },
-            ],
-            workers: vec![0, 1],
+            ]),
+            workers: Arc::new(vec![0, 1]),
             duration: 3.0,
         }
     }

@@ -11,8 +11,6 @@ use super::{CAUTION_AMBER, CRITICAL_RED, HUD_GREEN, INFO_DIM};
 use crate::analysis::{analyze_hotspots, FunctionHotspot};
 use crate::trace_data::TraceData;
 
-/// Aggregated function data: (worker counts, file, line)
-type FunctionData = (HashMap<u32, usize>, Option<String>, Option<u32>);
 
 /// Hotspot view showing top functions by sample count
 pub struct HotspotView {
@@ -102,19 +100,17 @@ impl HotspotView {
 
         let worker_set: HashSet<u32> = worker_ids.iter().copied().collect();
 
-        // Rebuild hotspots from filtered events
-        let mut function_data: HashMap<String, FunctionData> = HashMap::new();
-
-        for event in &data.events {
-            if !worker_set.contains(&event.worker_id) {
-                continue;
-            }
-
-            let entry = function_data
-                .entry(event.name.clone())
-                .or_insert_with(|| (HashMap::new(), event.file.clone(), event.line));
-            *entry.0.entry(event.worker_id).or_insert(0) += 1;
-        }
+        // Rebuild hotspots from filtered events using functional fold
+        let function_data = data.events
+            .iter()
+            .filter(|event| worker_set.contains(&event.worker_id))
+            .fold(HashMap::new(), |mut acc, event| {
+                let entry = acc
+                    .entry(event.name.clone())
+                    .or_insert_with(|| (HashMap::new(), event.file.clone(), event.line));
+                *entry.0.entry(event.worker_id).or_insert(0) += 1;
+                acc
+            });
 
         // Convert to vector and calculate percentages
         let total_samples =

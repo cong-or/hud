@@ -22,18 +22,19 @@ struct WorkerStats {
 
 impl WorkersPanel {
     pub fn new(data: &TraceData) -> Self {
-        let mut worker_stats: HashMap<u32, WorkerStats> = HashMap::new();
+        let worker_stats = data.events
+            .iter()
+            .fold(HashMap::new(), |mut acc, event| {
+                let stats = acc
+                    .entry(event.worker_id)
+                    .or_insert(WorkerStats { total_samples: 0, samples_with_functions: 0 });
 
-        for event in &data.events {
-            let stats = worker_stats
-                .entry(event.worker_id)
-                .or_insert(WorkerStats { total_samples: 0, samples_with_functions: 0 });
-
-            stats.total_samples += 1;
-            if event.name != "execution" {
-                stats.samples_with_functions += 1;
-            }
-        }
+                stats.total_samples += 1;
+                if event.name != "execution" {
+                    stats.samples_with_functions += 1;
+                }
+                acc
+            });
 
         Self { worker_stats }
     }
@@ -44,7 +45,7 @@ impl WorkersPanel {
         lines.push(Line::from(""));
 
         // Render each worker as a bar
-        for worker_id in &data.workers {
+        for worker_id in data.workers.iter() {
             if let Some(stats) = self.worker_stats.get(worker_id) {
                 let percentage = if stats.total_samples > 0 {
                     (stats.samples_with_functions as f64 / stats.total_samples as f64) * 100.0

@@ -64,7 +64,7 @@ fn test_parse_trace_aggregates_unique_workers() {
     assert!(data.workers.contains(&3));
 
     // Workers should be sorted
-    assert_eq!(data.workers, vec![1, 2, 3]);
+    assert_eq!(data.workers.as_ref(), &vec![1, 2, 3]);
 }
 
 #[test]
@@ -75,7 +75,7 @@ fn test_parse_trace_filters_non_begin_events() {
 
     // All events in our fixture are "B" events
     // If we had "E" events, they would be filtered out
-    for event in &data.events {
+    for event in data.events.iter() {
         // We can't verify ph directly since it's not stored,
         // but we know only B events are included
         assert!(!event.name.is_empty());

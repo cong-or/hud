@@ -5,6 +5,7 @@
 use anyhow::Result;
 use std::collections::HashSet;
 use std::path::Path;
+use std::sync::Arc;
 
 /// Represents a single trace event
 #[derive(Debug, Clone)]
@@ -20,19 +21,21 @@ pub struct TraceEvent {
 }
 
 /// Internal data model for profiler trace (immutable, loaded from file)
-#[derive(Debug)]
+/// Uses Arc for cheap cloning when converting from `LiveData`
+#[derive(Debug, Clone)]
 pub struct TraceData {
-    pub events: Vec<TraceEvent>,
-    pub workers: Vec<u32>,
+    pub events: Arc<Vec<TraceEvent>>,
+    pub workers: Arc<Vec<u32>>,
     pub duration: f64,
 }
 
 /// Live data model that grows as events arrive
+/// Uses Arc internally for cheap conversion to `TraceData`
 #[derive(Debug)]
 pub struct LiveData {
-    pub events: Vec<TraceEvent>,
+    events: Arc<Vec<TraceEvent>>,
     workers_set: HashSet<u32>,
-    pub workers: Vec<u32>,
+    workers: Arc<Vec<u32>>,
     pub duration: f64,
     start_time: Option<f64>,
 }
@@ -48,9 +51,9 @@ impl LiveData {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            events: Vec::new(),
+            events: Arc::new(Vec::new()),
             workers_set: HashSet::new(),
-            workers: Vec::new(),
+            workers: Arc::new(Vec::new()),
             duration: 0.0,
             start_time: None,
         }
@@ -63,10 +66,12 @@ impl LiveData {
             self.start_time = Some(event.timestamp);
         }
 
-        // Track workers
+        // Track workers (update when new worker appears)
         if self.workers_set.insert(event.worker_id) {
-            self.workers.push(event.worker_id);
-            self.workers.sort_unstable();
+            let mut workers_vec = Arc::make_mut(&mut self.workers).clone();
+            workers_vec.push(event.worker_id);
+            workers_vec.sort_unstable();
+            self.workers = Arc::new(workers_vec);
         }
 
         // Update duration
@@ -74,7 +79,8 @@ impl LiveData {
             self.duration = event.timestamp - start;
         }
 
-        self.events.push(event);
+        // Add event to the Arc'd Vec
+        Arc::make_mut(&mut self.events).push(event);
     }
 
     /// Get event count
@@ -84,11 +90,12 @@ impl LiveData {
     }
 
     /// Convert to `TraceData` for compatibility with existing TUI code
+    /// This is now a cheap clone (just Arc reference counting) instead of deep cloning
     #[must_use]
     pub fn as_trace_data(&self) -> TraceData {
         TraceData {
-            events: self.events.clone(),
-            workers: self.workers.clone(),
+            events: Arc::clone(&self.events),
+            workers: Arc::clone(&self.workers),
             duration: self.duration,
         }
     }
@@ -104,17 +111,13 @@ impl TraceData {
         let content = std::fs::read_to_string(path)?;
         let json: serde_json::Value = serde_json::from_str(&content)?;
 
-        let mut events = Vec::new();
-        let mut workers = std::collections::HashSet::new();
-        let mut max_timestamp = 0.0f64;
-
-        if let Some(trace_events) = json["traceEvents"].as_array() {
-            for event in trace_events {
-                // Only process "B" (begin) events for now
-                if event["ph"].as_str() != Some("B") {
-                    continue;
-                }
-
+        // Parse trace events using functional pipeline: filter "B" events, then map to TraceEvent
+        let events: Vec<TraceEvent> = json["traceEvents"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|event| event["ph"].as_str() == Some("B"))
+            .map(|event| {
                 let name = event["name"].as_str().unwrap_or("unknown").to_string();
                 let worker_id = event["args"]["worker_id"].as_u64().unwrap_or(0) as u32;
                 let tid = event["tid"].as_u64().unwrap_or(0) as u32;
@@ -124,10 +127,7 @@ impl TraceData {
                 let file = event["args"]["file"].as_str().map(std::string::ToString::to_string);
                 let line = event["args"]["line"].as_u64().map(|v| v as u32);
 
-                workers.insert(worker_id);
-                max_timestamp = max_timestamp.max(timestamp);
-
-                events.push(TraceEvent {
+                TraceEvent {
                     name,
                     worker_id,
                     tid,
@@ -136,13 +136,28 @@ impl TraceData {
                     detection_method,
                     file,
                     line,
-                });
-            }
-        }
+                }
+            })
+            .collect();
 
-        let mut workers: Vec<u32> = workers.into_iter().collect();
+        // Extract unique workers and max timestamp
+        let mut workers: Vec<u32> = events
+            .iter()
+            .map(|e| e.worker_id)
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
         workers.sort_unstable();
 
-        Ok(TraceData { events, workers, duration: max_timestamp })
+        let max_timestamp = events
+            .iter()
+            .map(|e| e.timestamp)
+            .fold(0.0f64, f64::max);
+
+        Ok(TraceData {
+            events: Arc::new(events),
+            workers: Arc::new(workers),
+            duration: max_timestamp,
+        })
     }
 }

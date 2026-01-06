@@ -28,7 +28,7 @@ impl TimelineView {
         // Calculate statistics for each worker
         let mut worker_stats: HashMap<u32, WorkerStats> = HashMap::new();
 
-        for event in &data.events {
+        for event in data.events.iter() {
             let stats = worker_stats.entry(event.worker_id).or_insert(WorkerStats {
                 total_samples: 0,
                 samples_with_functions: 0,
@@ -109,7 +109,7 @@ impl TimelineView {
         lines.push(Line::from("─".repeat(70)));
 
         // Worker rows
-        for worker_id in &data.workers {
+        for worker_id in data.workers.iter() {
             if let Some(stats) = self.worker_stats.get(worker_id) {
                 let success_rate = if stats.total_samples > 0 {
                     (stats.samples_with_functions as f64 / stats.total_samples as f64) * 100.0

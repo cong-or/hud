@@ -71,7 +71,7 @@ impl App {
         let workers_panel = WorkersPanel::new(&data);
         let timeline_view = TimelineView::new(&data);
 
-        let all_workers = data.workers.clone();
+        let all_workers = data.workers.as_ref().clone();
 
         Self {
             data,
@@ -109,7 +109,7 @@ impl App {
                         self.search_query.clear();
                         self.hotspot_view.clear_filter();
                         // Reset to all workers
-                        self.selected_workers = self.data.workers.clone();
+                        self.selected_workers = self.data.workers.as_ref().clone();
                         self.hotspot_view.filter_by_workers(&self.selected_workers, &self.data);
                     }
                     KeyCode::Char('w' | 'W') => {
@@ -178,7 +178,7 @@ impl App {
                     }
                     KeyCode::Char('a' | 'A') => {
                         // Select all workers
-                        self.selected_workers = self.data.workers.clone();
+                        self.selected_workers = self.data.workers.as_ref().clone();
                     }
                     KeyCode::Char('n' | 'N') => {
                         // Select none
@@ -189,7 +189,7 @@ impl App {
                         self.view_mode = ViewMode::Analysis;
                         if self.selected_workers.is_empty() {
                             // If no workers selected, show all
-                            self.selected_workers = self.data.workers.clone();
+                            self.selected_workers = self.data.workers.as_ref().clone();
                         }
                         self.hotspot_view.filter_by_workers(&self.selected_workers, &self.data);
                     }
