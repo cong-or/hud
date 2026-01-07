@@ -179,31 +179,29 @@ impl<'a> EventProcessor<'a> {
     /// Convert `TaskEvent` to `TraceEvent` with symbol resolution
     #[allow(clippy::cast_precision_loss)]
     fn convert_to_trace_event(&self, event: &TaskEvent, top_frame_addr: Option<u64>) -> TraceEvent {
-        // Resolve symbol for event name
-        let (name, file, line) = if let Some(addr) = top_frame_addr {
-            // Adjust address for PIE executables
-            let file_offset = if let Some(range) = self.memory_range {
-                if range.contains(addr) {
-                    addr - range.start
-                } else {
-                    addr
-                }
-            } else {
-                addr
-            };
+        // Resolve symbol for event name using functional combinators
+        let (name, file, line) = top_frame_addr
+            .map(|addr| {
+                // Adjust address for PIE executables
+                let file_offset = self
+                    .memory_range
+                    .filter(|range| range.contains(addr))
+                    .map(|range| addr - range.start)
+                    .unwrap_or(addr);
 
-            let resolved = self.symbolizer.resolve(file_offset);
-            if let Some(frame) = resolved.frames.first() {
-                let func = frame.function.clone();
-                let file_path = frame.location.as_ref().and_then(|loc| loc.file.clone());
-                let line_num = frame.location.as_ref().and_then(|loc| loc.line);
-                (func, file_path, line_num)
-            } else {
-                (format!("0x{addr:x}"), None, None)
-            }
-        } else {
-            ("execution".to_string(), None, None)
-        };
+                let resolved = self.symbolizer.resolve(file_offset);
+                resolved
+                    .frames
+                    .first()
+                    .map(|frame| {
+                        let func = frame.function.clone();
+                        let file_path = frame.location.as_ref().and_then(|loc| loc.file.clone());
+                        let line_num = frame.location.as_ref().and_then(|loc| loc.line);
+                        (func, file_path, line_num)
+                    })
+                    .unwrap_or_else(|| (format!("0x{addr:x}"), None, None))
+            })
+            .unwrap_or_else(|| ("execution".to_string(), None, None));
 
         TraceEvent {
             name,

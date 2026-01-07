@@ -39,30 +39,34 @@ pub fn parse_memory_maps(pid: i32, binary_path: &str) -> Result<MemoryRange> {
     let maps_path = format!("/proc/{pid}/maps");
     let maps = fs::read_to_string(&maps_path).context(format!("Failed to read {maps_path}"))?;
 
-    let mut start_addr = None;
-    let mut end_addr = None;
-
     // Find ALL mappings of the target binary to get the full range
-    for line in maps.lines() {
-        if line.contains(binary_path) {
+    let (start_addr, end_addr) = maps
+        .lines()
+        .filter(|line| line.contains(binary_path))
+        .filter_map(|line| {
             // Parse the line: "start-end perms offset dev inode pathname"
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() >= 3 {
                 let range = parts[0];
                 let range_parts: Vec<&str> = range.split('-').collect();
                 if range_parts.len() == 2 {
-                    let start = u64::from_str_radix(range_parts[0], 16)
-                        .context("Failed to parse range start")?;
-                    let end = u64::from_str_radix(range_parts[1], 16)
-                        .context("Failed to parse range end")?;
-
-                    // Track the minimum start and maximum end
-                    start_addr = Some(start_addr.map_or(start, |s: u64| s.min(start)));
-                    end_addr = Some(end_addr.map_or(end, |e: u64| e.max(end)));
+                    let start = u64::from_str_radix(range_parts[0], 16).ok()?;
+                    let end = u64::from_str_radix(range_parts[1], 16).ok()?;
+                    Some((start, end))
+                } else {
+                    None
                 }
+            } else {
+                None
             }
-        }
-    }
+        })
+        .fold((None, None), |(min_start, max_end), (start, end)| {
+            // Track the minimum start and maximum end
+            (
+                Some(min_start.map_or(start, |s: u64| s.min(start))),
+                Some(max_end.map_or(end, |e: u64| e.max(end))),
+            )
+        });
 
     match (start_addr, end_addr) {
         (Some(start), Some(end)) => {

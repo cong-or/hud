@@ -18,24 +18,24 @@ pub fn online_cpus() -> Result<Vec<CpuId>> {
     let content = fs::read_to_string("/sys/devices/system/cpu/online")
         .context("Failed to read /sys/devices/system/cpu/online")?;
 
-    let mut cpus = Vec::new();
-
-    for range in content.trim().split(',') {
-        if let Some((start, end)) = range.split_once('-') {
-            // Range like "0-3"
-            let start: u32 = start.parse()?;
-            let end: u32 = end.parse()?;
-            for cpu in start..=end {
-                cpus.push(CpuId(cpu));
+    let cpu_ranges: Vec<Vec<CpuId>> = content
+        .trim()
+        .split(',')
+        .map(|range| -> Result<Vec<CpuId>> {
+            if let Some((start, end)) = range.split_once('-') {
+                // Range like "0-3"
+                let start: u32 = start.parse()?;
+                let end: u32 = end.parse()?;
+                Ok((start..=end).map(CpuId).collect())
+            } else {
+                // Single CPU like "5"
+                let cpu: u32 = range.parse()?;
+                Ok(vec![CpuId(cpu)])
             }
-        } else {
-            // Single CPU like "5"
-            let cpu: u32 = range.parse()?;
-            cpus.push(CpuId(cpu));
-        }
-    }
+        })
+        .collect::<Result<Vec<Vec<CpuId>>>>()?;
 
-    Ok(cpus)
+    Ok(cpu_ranges.into_iter().flatten().collect())
 }
 
 #[cfg(test)]
