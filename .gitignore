@@ -6,3 +6,6 @@ target/
 *.swp
 *.swo
 *~
+
+# Working notes and temporary files
+/notes/
