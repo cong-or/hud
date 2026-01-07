@@ -61,7 +61,7 @@ pub const TRACE_EXECUTION_END: u32 = 11;
 
 /// **Sampling Profiler**: Periodic stack sample (unused, for future use)
 ///
-/// Emitted by: `on_cpu_sample` perf_event hook
+/// Emitted by: `on_cpu_sample` `perf_event` hook
 /// Detection Method: 4 (sampling)
 pub const TRACE_FUNCTION_SAMPLE: u32 = 12;
 
@@ -274,7 +274,7 @@ pub struct WorkerInfo {
 /// Execution span tracking (for timeline visualization)
 ///
 /// Tracks what each worker is currently executing. Created when worker
-/// goes ON-CPU (`sched_switch` next_pid) and completed when goes OFF-CPU.
+/// goes ON-CPU (`sched_switch` `next_pid`) and completed when goes OFF-CPU.
 /// Stored in the `EXECUTION_SPANS` eBPF map.
 #[repr(C)]
 #[derive(Clone, Copy)]
