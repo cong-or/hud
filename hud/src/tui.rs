@@ -747,19 +747,17 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
                 timeline_view.render(f, bottom_cols[1], &trace_data);
 
                 // Status bar
-                let mode_indicator = has_events
-                    .then(|| {
-                        Span::styled(
-                            "Mode: LIVE PROFILING",
-                            Style::default().fg(CRITICAL_RED).add_modifier(Modifier::BOLD),
-                        )
-                    })
-                    .unwrap_or_else(|| {
-                        Span::styled(
-                            "AWAITING EVENTS... (generate load on target)",
-                            Style::default().fg(INFO_DIM),
-                        )
-                    });
+                let mode_indicator = if has_events {
+                    Span::styled(
+                        "Mode: LIVE PROFILING",
+                        Style::default().fg(CRITICAL_RED).add_modifier(Modifier::BOLD),
+                    )
+                } else {
+                    Span::styled(
+                        "AWAITING EVENTS... (generate load on target)",
+                        Style::default().fg(INFO_DIM),
+                    )
+                };
 
                 let status_line = Line::from(vec![
                     Span::styled("[Q]", Style::default().fg(CAUTION_AMBER)),
