@@ -136,14 +136,14 @@ pub fn register_tokio_workers(bpf: &mut Ebpf, pid: i32) -> Result<usize> {
     Ok(workers.len())
 }
 
-/// Setup scheduler-based blocking detection (Phase 3a)
+/// Setup scheduler-based blocking detection
 /// Returns the number of worker threads registered
 ///
 /// # Errors
 /// Returns an error if eBPF map access, tracepoint attachment, or perf event setup fails
 #[allow(clippy::cast_sign_loss)]
 pub fn setup_scheduler_detection(bpf: &mut Ebpf, pid: i32) -> Result<usize> {
-    println!("\n🔧 Phase 3a: Setting up scheduler-based detection...");
+    println!("\n🔧 Setting up scheduler-based detection...");
 
     // 1. Set configuration (5ms threshold and target PID)
     let mut config_map: HashMap<_, u32, u64> =

@@ -157,7 +157,7 @@ fn try_set_task_id(ctx: &ProbeContext) -> Result<(), i64> {
     Ok(())
 }
 
-/// Hook: sched_switch tracepoint (Phase 3a: Scheduler-based detection)
+/// Hook: sched_switch tracepoint for scheduler-based blocking detection
 /// Fires when the Linux scheduler switches between threads
 #[tracepoint]
 pub fn sched_switch_hook(ctx: TracePointContext) -> u32 {
@@ -187,7 +187,7 @@ fn try_sched_switch(ctx: &TracePointContext) -> Result<(), i64> {
 }
 
 fn handle_thread_off_cpu(tid: u32, state: i64, now: u64) -> Result<(), i64> {
-    // Phase 3+: Emit execution end event for Tokio workers
+    // Emit execution end event for Tokio workers
     if is_tokio_worker(tid) {
         // Get execution span if it exists
         let span = unsafe { EXECUTION_SPANS.get(&tid).copied() };
@@ -206,7 +206,7 @@ fn handle_thread_off_cpu(tid: u32, state: i64, now: u64) -> Result<(), i64> {
         }
     }
 
-    // Update thread state (for legacy scheduler-based detection)
+    // Update thread state for blocking detection
     let mut thread_state = unsafe { THREAD_STATE.get(&tid).copied().unwrap_or_default() };
 
     thread_state.last_off_cpu_ns = now;
@@ -226,7 +226,7 @@ fn handle_thread_on_cpu(tid: u32, now: u64, ctx: &TracePointContext) -> Result<(
         return Ok(());
     }
 
-    // Phase 3+: Track execution span and emit start event
+    // Track execution span and emit start event
     // Use BPF_F_USER_STACK (0x100) | BPF_F_FAST_STACK_CMP (0x200) for better unwinding
     let stack_id = unsafe { STACK_TRACES.get_stackid(ctx, 0x300).unwrap_or(-1) };
     let cpu_id = get_cpu_id();
@@ -241,7 +241,7 @@ fn handle_thread_on_cpu(tid: u32, now: u64, ctx: &TracePointContext) -> Result<(
     // Emit TRACE_EXECUTION_START event
     emit_execution_start(tid, now, stack_id)?;
 
-    // Get thread state (for legacy scheduler-based detection)
+    // Get thread state for blocking detection
     let mut thread_state = unsafe { THREAD_STATE.get(&tid).copied().unwrap_or_default() };
 
     // Calculate how long thread was OFF CPU
