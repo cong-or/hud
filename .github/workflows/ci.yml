@@ -26,10 +26,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
+      - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+
+      - name: Install Rust nightly (for eBPF)
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install bpf-linker
+        run: cargo install bpf-linker --locked
+
+      - name: Build eBPF program
+        run: cargo xtask build-ebpf
 
       - name: Run clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
@@ -40,8 +54,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
+      - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Rust nightly (for eBPF)
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install bpf-linker
+        run: cargo install bpf-linker --locked
+
+      - name: Build eBPF program
+        run: cargo xtask build-ebpf
 
       - name: Run tests
         run: cargo test --workspace --all-features
