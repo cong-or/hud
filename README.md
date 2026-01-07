@@ -63,7 +63,7 @@ debug = true
 force-frame-pointers = true
 ```
 
-> **Building from source?** See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for build dependencies.
+> **Want to contribute?** See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for build setup.
 
 ## How It Works
 
