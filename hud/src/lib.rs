@@ -24,7 +24,7 @@
 //! - [`export`] - Chrome Trace Event Format (JSON) export
 //! - [`cli`] - Command-line argument parsing
 //! - [`trace_data`] - Event data structures
-//! - [`domain`] - Core types (Pid, Tid, StackId, CpuId)
+//! - [`domain`] - Core types (Pid, Tid, `StackId`, `CpuId`)
 
 // Expose modules for testing
 pub mod analysis;

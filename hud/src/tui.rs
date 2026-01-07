@@ -5,9 +5,9 @@
 //! ## View Modes
 //!
 //! - **Analysis** - Hotspot list + worker stats (default)
-//! - **DrillDown** - Detailed view of selected function
+//! - **`DrillDown`** - Detailed view of selected function
 //! - **Search** - Filter hotspots by name
-//! - **WorkerFilter** - Select which workers to display
+//! - **`WorkerFilter`** - Select which workers to display
 //!
 //! ## Operational Modes
 //!
