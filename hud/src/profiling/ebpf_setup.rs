@@ -16,14 +16,14 @@ use crate::profiling::{identify_tokio_workers, online_cpus};
 
 /// Load the eBPF program binary
 ///
+/// Always uses the release build because debug builds with recent Rust nightlies (1.94+)
+/// pull in formatting code (LowerHex) that's incompatible with BPF. The release build
+/// uses LTO to eliminate dead code. eBPF programs are small and compile fast in release.
+///
 /// # Errors
 /// Returns an error if the eBPF program binary cannot be loaded
 pub fn load_ebpf_program() -> Result<Ebpf> {
-    #[cfg(debug_assertions)]
-    let bpf = Ebpf::load(include_bytes_aligned!("../../../target/bpfel-unknown-none/debug/hud"))?;
-    #[cfg(not(debug_assertions))]
     let bpf = Ebpf::load(include_bytes_aligned!("../../../target/bpfel-unknown-none/release/hud"))?;
-
     Ok(bpf)
 }
 

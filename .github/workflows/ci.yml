@@ -42,20 +42,6 @@ jobs:
       - name: Install bpf-linker
         run: cargo install bpf-linker --locked
 
-      # Workaround for bpf-linker LLVM library incompatibility
-      # Recent Rust nightlies use linker scripts (.so files containing "INPUT(...)") instead
-      # of direct symlinks to the LLVM shared library. bpf-linker v0.9.15 doesn't handle
-      # linker scripts correctly, causing "file too short" errors when trying to load LLVM.
-      # This creates a direct symlink to the actual LLVM .so file so bpf-linker can find it.
-      # See: https://github.com/aya-rs/bpf-linker/issues/200
-      - name: Fix LLVM symlink for bpf-linker
-        run: |
-          NIGHTLY_PATH=$(rustup toolchain list --verbose | grep nightly | grep -oP '/.*')
-          if [ -f "$NIGHTLY_PATH/lib/libLLVM-21-rust-1.94.0-nightly.so" ] && [ ! -L "$NIGHTLY_PATH/lib/libLLVM-21-rust-1.94.0-nightly.so" ]; then
-            rm "$NIGHTLY_PATH/lib/libLLVM-21-rust-1.94.0-nightly.so"
-            ln -s "$NIGHTLY_PATH/lib"/libLLVM.so.21.*-rust-*.so "$NIGHTLY_PATH/lib/libLLVM-21-rust-1.94.0-nightly.so"
-          fi
-
       - name: Build eBPF program
         run: cargo xtask build-ebpf
 
@@ -81,20 +67,6 @@ jobs:
 
       - name: Install bpf-linker
         run: cargo install bpf-linker --locked
-
-      # Workaround for bpf-linker LLVM library incompatibility
-      # Recent Rust nightlies use linker scripts (.so files containing "INPUT(...)") instead
-      # of direct symlinks to the LLVM shared library. bpf-linker v0.9.15 doesn't handle
-      # linker scripts correctly, causing "file too short" errors when trying to load LLVM.
-      # This creates a direct symlink to the actual LLVM .so file so bpf-linker can find it.
-      # See: https://github.com/aya-rs/bpf-linker/issues/200
-      - name: Fix LLVM symlink for bpf-linker
-        run: |
-          NIGHTLY_PATH=$(rustup toolchain list --verbose | grep nightly | grep -oP '/.*')
-          if [ -f "$NIGHTLY_PATH/lib/libLLVM-21-rust-1.94.0-nightly.so" ] && [ ! -L "$NIGHTLY_PATH/lib/libLLVM-21-rust-1.94.0-nightly.so" ]; then
-            rm "$NIGHTLY_PATH/lib/libLLVM-21-rust-1.94.0-nightly.so"
-            ln -s "$NIGHTLY_PATH/lib"/libLLVM.so.21.*-rust-*.so "$NIGHTLY_PATH/lib/libLLVM-21-rust-1.94.0-nightly.so"
-          fi
 
       - name: Build eBPF program
         run: cargo xtask build-ebpf
