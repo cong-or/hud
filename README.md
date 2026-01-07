@@ -72,7 +72,7 @@ Attaches eBPF programs to capture:
 - CPU samples (perf_event @ 99Hz) - what's executing now
 - Stack traces with DWARF symbols - file:line resolution
 
-Zero overhead, works on any Tokio app.
+Zero overhead, designed for Tokio.
 
 ## Docs
 
