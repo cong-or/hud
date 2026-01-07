@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-aya-ebpf = "0.1"
-aya-log-ebpf = "0.1"
+aya-ebpf = { version = "0.1", default-features = false }
+aya-log-ebpf = { version = "0.1", default-features = false }
 hud-common = { path = "../hud-common" }
 
 [[bin]]
