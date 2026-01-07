@@ -74,31 +74,11 @@ Attaches eBPF programs to capture:
 
 Zero overhead, works on any Tokio app.
 
-## Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| No function names? | Add `debug = true` to Cargo.toml |
-| Permission denied? | Use `sudo -E` to preserve env |
-| No events? | Target must be running Tokio app |
-
-See [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for details.
-
-## vs Flamegraph
-
-| Flamegraph | hud |
-|------------|-----|
-| Aggregated | Real-time |
-| Static | Live updating |
-| Overall | Per-worker |
-| No locations | file:line |
-
-Use both: flamegraph for structure, hud for behavior.
-
 ## Docs
 
 - [Architecture](docs/ARCHITECTURE.md) - Internals
 - [TUI Guide](docs/TUI.md) - Interface details
+- [Troubleshooting](docs/TROUBLESHOOTING.md) - Common issues
 - [Development](docs/DEVELOPMENT.md) - Contributing
 
 ## License
