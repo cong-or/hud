@@ -662,13 +662,14 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
         // Convert to TraceData for rendering
         let trace_data = live_data.as_trace_data();
 
-        // Only redraw if we have data and enough time has passed
-        if !trace_data.events.is_empty() && last_update.elapsed() >= UPDATE_INTERVAL {
+        // Redraw periodically (even when idle, to show waiting state)
+        if last_update.elapsed() >= UPDATE_INTERVAL {
             // Rebuild panels with latest data
             let status_panel = StatusPanel::new(&trace_data);
             let hotspot_view = HotspotView::new(&trace_data);
             let workers_panel = WorkersPanel::new(&trace_data);
             let timeline_view = TimelineView::new(&trace_data);
+            let has_events = !trace_data.events.is_empty();
 
             terminal.draw(|f| {
                 let outer_layout = Layout::default()
@@ -746,13 +747,24 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
                 timeline_view.render(f, bottom_cols[1], &trace_data);
 
                 // Status bar
+                let mode_indicator = has_events
+                    .then(|| {
+                        Span::styled(
+                            "Mode: LIVE PROFILING",
+                            Style::default().fg(CRITICAL_RED).add_modifier(Modifier::BOLD),
+                        )
+                    })
+                    .unwrap_or_else(|| {
+                        Span::styled(
+                            "AWAITING EVENTS... (generate load on target)",
+                            Style::default().fg(INFO_DIM),
+                        )
+                    });
+
                 let status_line = Line::from(vec![
                     Span::styled("[Q]", Style::default().fg(CAUTION_AMBER)),
                     Span::raw(" Quit    "),
-                    Span::styled(
-                        "Mode: LIVE PROFILING",
-                        Style::default().fg(CRITICAL_RED).add_modifier(Modifier::BOLD),
-                    ),
+                    mode_indicator,
                 ]);
 
                 let status =
