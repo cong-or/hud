@@ -51,27 +51,19 @@ All updating in real-time as your code runs.
 
 ## Requirements
 
-**Enable debug symbols:**
+**System:**
+- Linux 5.15+ (eBPF support)
+- Root or CAP_BPF privileges (for eBPF attachment)
+
+**Target binary must have debug symbols:**
 ```toml
+# In your application's Cargo.toml
 [profile.release]
 debug = true
 force-frame-pointers = true
 ```
 
-**Install dependencies:**
-```bash
-# Fedora/RHEL
-sudo dnf install llvm-devel clang
-
-# Ubuntu/Debian
-sudo apt install llvm-21-dev libclang-21-dev
-
-# Rust toolchain
-rustup toolchain install nightly --component rust-src
-cargo install bpf-linker --features llvm-21
-```
-
-**System:** Linux 5.15+, root/CAP_BPF privileges
+> **Building from source?** See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for build dependencies.
 
 ## How It Works
 
