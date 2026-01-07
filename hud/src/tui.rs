@@ -1,3 +1,207 @@
+//! # Terminal User Interface (TUI)
+//!
+//! This module implements an interactive terminal UI for Runtime Scope using
+//! `ratatui` (Rust TUI library). It provides real-time visualization of blocking
+//! operations, hotspot analysis, and worker thread timelines.
+//!
+//! ## Architecture
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────┐
+//! │                    Main Thread                              │
+//! │  • eBPF event loop                                          │
+//! │  • EventProcessor                                           │
+//! │  • Send events to TUI via channel                           │
+//! └───────────────────────────┬─────────────────────────────────┘
+//!                             │ crossbeam::Sender<TraceEvent>
+//!                             ▼
+//! ┌─────────────────────────────────────────────────────────────┐
+//! │                    TUI Thread                               │
+//! │                                                             │
+//! │  ┌──────────────────────────────────────────────────────┐  │
+//! │  │  Event Loop (16ms / ~60 FPS)                         │  │
+//! │  │  • Poll keyboard (non-blocking)                      │  │
+//! │  │  • Poll event channel (non-blocking)                 │  │
+//! │  │  • Update TraceData                                  │  │
+//! │  │  • Render current view                               │  │
+//! │  └──────────────────────────────────────────────────────┘  │
+//! │                            │                                │
+//! │                            ▼                                │
+//! │  ┌──────────────────────────────────────────────────────┐  │
+//! │  │  View Router (ViewMode)                              │  │
+//! │  │  • Analysis    → Hotspot + Workers + Status          │  │
+//! │  │  • DrillDown   → Timeline + Stack traces             │  │
+//! │  │  • Search      → Filtered hotspots                   │  │
+//! │  │  • WorkerFilter → Select which workers to display    │  │
+//! │  └──────────────────────────────────────────────────────┘  │
+//! └─────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## View Modes
+//!
+//! The TUI supports four interactive view modes:
+//!
+//! ### 1. Analysis Mode (default)
+//!
+//! **Purpose**: Overview of blocking hotspots and worker statistics
+//!
+//! **Layout**:
+//! ```text
+//! ┌───────────────────────────────────────────────────────────────┐
+//! │  Status: 1,234 events | 5 workers | 23 hotspots               │ (StatusPanel)
+//! ├───────────────────────────────────────────────────────────────┤
+//! │  HOTSPOTS (sorted by total duration)                          │
+//! │  ┌─────────────────────────────────────────────────────────┐ │
+//! │  │ ▼ spawn_blocking::block_on   3,245ms  (52 hits)         │ │ (HotspotView)
+//! │  │   file_io::read_file         1,892ms  (34 hits)         │ │
+//! │  │   compute::expensive_calc    1,023ms  (12 hits)         │ │
+//! │  │   ...                                                    │ │
+//! │  └─────────────────────────────────────────────────────────┘ │
+//! ├───────────────────────────────────────────────────────────────┤
+//! │  WORKERS                                                       │
+//! │  Worker 0: ████████████░░░  (75% active, 12 blocks)           │ (WorkersPanel)
+//! │  Worker 1: ███████░░░░░░░░  (50% active, 8 blocks)            │
+//! │  Worker 2: ████████████████ (100% active, 23 blocks)          │
+//! └───────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! **Keyboard**:
+//! - `↑/↓`: Navigate hotspots list
+//! - `Enter`: Drill down into selected hotspot (→ DrillDown mode)
+//! - `w`: Open worker filter (→ WorkerFilter mode)
+//! - `/`: Search hotspots (→ Search mode)
+//! - `q`: Quit
+//!
+//! ### 2. DrillDown Mode
+//!
+//! **Purpose**: Detailed view of individual blocking operations
+//!
+//! **Layout**:
+//! ```text
+//! ┌───────────────────────────────────────────────────────────────┐
+//! │ HOTSPOT: spawn_blocking::block_on                             │
+//! │ Total: 3,245ms | Hits: 52 | Avg: 62ms                         │
+//! ├───────────────────────────────────────────────────────────────┤
+//! │ TIMELINE (per-worker execution spans)                         │ (TimelineView)
+//! │ Worker 0: ─▂▃▄▅▆▇█─────▂▃▄───                                │
+//! │ Worker 1: ────▂▃▄▅▆▇█──────▂▃                                │
+//! │ Worker 2: ▂▃▄────────▂▃▄▅▆▇█─                                │
+//! ├───────────────────────────────────────────────────────────────┤
+//! │ STACK TRACES (aggregated)                                     │
+//! │ #0 spawn_blocking::block_on at pool.rs:42                     │
+//! │ #1 file_io::read_file at io.rs:123                            │
+//! │ #2 handler::process at main.rs:567                            │
+//! └───────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! **Keyboard**:
+//! - `Esc`: Return to Analysis mode
+//! - `↑/↓`: Scroll timeline
+//!
+//! ### 3. Search Mode
+//!
+//! **Purpose**: Filter hotspots by function name or file path
+//!
+//! **Layout**:
+//! ```text
+//! ┌───────────────────────────────────────────────────────────────┐
+//! │ Search: file_io▂                                              │
+//! ├───────────────────────────────────────────────────────────────┤
+//! │ FILTERED RESULTS (3 matches)                                  │
+//! │  file_io::read_file          1,892ms  (34 hits)               │
+//! │  file_io::write_file          432ms  (12 hits)                │
+//! │  file_io::delete_file          89ms  (3 hits)                 │
+//! └───────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! **Keyboard**:
+//! - Type to search
+//! - `Enter`: Select result and drill down
+//! - `Esc`: Return to Analysis mode
+//!
+//! ### 4. WorkerFilter Mode
+//!
+//! **Purpose**: Select which worker threads to display
+//!
+//! **Layout**:
+//! ```text
+//! ┌───────────────────────────────────────────────────────────────┐
+//! │ WORKER FILTER (space to toggle, enter to apply)               │
+//! │  [x] Worker 0 (1,234 events)                                  │
+//! │  [x] Worker 1 (987 events)                                    │
+//! │  [ ] Worker 2 (456 events) ← deselected                       │
+//! │  [x] Worker 3 (789 events)                                    │
+//! └───────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! **Keyboard**:
+//! - `↑/↓`: Navigate workers
+//! - `Space`: Toggle worker selection
+//! - `Enter`: Apply filter and return
+//! - `Esc`: Cancel and return
+//!
+//! ## Data Flow
+//!
+//! ### Live Mode (Real-Time)
+//!
+//! ```text
+//! 1. Main thread processes eBPF events
+//!    ↓
+//! 2. EventProcessor converts to TraceEvent
+//!    ↓
+//! 3. try_send() to crossbeam channel (non-blocking)
+//!    ↓
+//! 4. TUI thread polls channel (try_recv, non-blocking)
+//!    ↓
+//! 5. LiveData accumulates events
+//!    ↓
+//! 6. UI re-renders every 16ms (~60 FPS)
+//! ```
+//!
+//! **Non-blocking Design**: Both main and TUI threads are non-blocking:
+//! - Main: `try_send()` drops events if TUI is slow (backpressure)
+//! - TUI: `try_recv()` polls without blocking render loop
+//!
+//! ### Replay Mode (Offline)
+//!
+//! ```text
+//! 1. Load trace.json from disk
+//!    ↓
+//! 2. Parse into TraceData
+//!    ↓
+//! 3. Build hotspot index
+//!    ↓
+//! 4. Launch TUI (no channel, static data)
+//!    ↓
+//! 5. UI renders pre-computed data
+//! ```
+//!
+//! ## Performance Considerations
+//!
+//! - **Frame Rate**: 60 FPS (16ms frame budget)
+//! - **Event Rate**: Can handle >10k events/sec (channel drops on overload)
+//! - **Hotspot Limit**: Top 100 hotspots displayed (sorted by duration)
+//! - **Timeline Resolution**: Adaptive based on time window
+//! - **Memory**: Bounded by max events (~1M events = ~100MB)
+//!
+//! ## Rendering Pipeline
+//!
+//! Each frame follows this sequence:
+//! 1. **Poll Input**: Check for keyboard events (non-blocking)
+//! 2. **Update State**: Process new events from channel
+//! 3. **Build Widgets**: Create ratatui widgets based on current state
+//! 4. **Layout**: Calculate widget positions (flex layout)
+//! 5. **Draw**: Render widgets to terminal buffer
+//! 6. **Flush**: Write buffer to terminal (single syscall)
+//!
+//! ## Sub-Modules
+//!
+//! - **`hotspot`**: Hotspot list view and sorting logic
+//! - **`timeline`**: Per-worker execution timeline visualization
+//! - **`workers`**: Worker thread statistics panel
+//! - **`status`**: Top status bar with summary statistics
+//! - **`theme`**: Color scheme and styling constants
+
 // TUI rendering intentionally uses precision-losing casts and long functions for clarity
 #![allow(
     clippy::cast_precision_loss,

@@ -1,3 +1,148 @@
+//! # Runtime Scope - Main Entry Point
+//!
+//! This binary serves as the main entry point for the Runtime Scope profiler,
+//! supporting three distinct operational modes based on command-line arguments.
+//!
+//! ## Operational Modes
+//!
+//! ### Mode 1: Replay Mode (`--replay <trace.json>`)
+//! - **Purpose**: Analyze previously recorded trace files offline
+//! - **Requirements**: Only a trace file (no root privileges needed)
+//! - **Behavior**:
+//!   - Loads trace data from JSON file (Chrome Trace Event Format)
+//!   - Launches TUI with hotspot analysis and event browsing
+//!   - No eBPF or live profiling involved
+//! - **Use Cases**: Post-mortem analysis, sharing traces with team members
+//!
+//! Example:
+//! ```bash
+//! ./hud --replay trace.json
+//! ```
+//!
+//! ### Mode 2: Live TUI Mode (default)
+//! - **Purpose**: Real-time profiling with interactive terminal interface
+//! - **Requirements**: `--pid <PID> --target <BINARY>`, root/CAP_BPF privileges
+//! - **Behavior**:
+//!   - Attaches eBPF programs to target process
+//!   - Streams events to TUI in separate thread
+//!   - User can navigate between Live/Hotspots/Raw views
+//!   - Optional `--export` saves trace to file on exit
+//! - **Use Cases**: Interactive debugging, real-time monitoring
+//!
+//! Example:
+//! ```bash
+//! sudo ./hud --pid 12345 --target ./my_tokio_app
+//! sudo ./hud --pid 12345 --target ./my_tokio_app --export trace.json
+//! ```
+//!
+//! ### Mode 3: Headless Mode (`--headless`)
+//! - **Purpose**: Non-interactive profiling for CI/CD or logging
+//! - **Requirements**: Same as Live TUI + `--headless` flag
+//! - **Behavior**:
+//!   - Attaches eBPF programs to target process
+//!   - Prints events and statistics to stdout
+//!   - No TUI or interactive features
+//!   - Requires `--export` or `--duration` for bounded execution
+//! - **Use Cases**: Automated performance testing, log aggregation
+//!
+//! Example:
+//! ```bash
+//! sudo ./hud --pid 12345 --target ./my_tokio_app --headless --duration 60
+//! ```
+//!
+//! ## Program Flow
+//!
+//! ```text
+//! ┌─────────────────────┐
+//! │  Parse CLI Args     │
+//! └──────────┬──────────┘
+//!            │
+//!            ├─── --replay? ──────────────────┐
+//!            │                                 ▼
+//!            │                      ┌──────────────────────┐
+//!            │                      │ Mode 1: Replay       │
+//!            │                      │ • Load trace.json    │
+//!            │                      │ • Launch TUI         │
+//!            │                      └──────────────────────┘
+//!            │
+//!            └─── Live Profiling ────────────┐
+//!                                             ▼
+//!                              ┌──────────────────────────┐
+//!                              │ Load & Attach eBPF       │
+//!                              │ • Uprobes                │
+//!                              │ • Tracepoints            │
+//!                              │ • Perf Events (99Hz)     │
+//!                              └─────────┬────────────────┘
+//!                                        │
+//!                              ┌─────────▼────────────────┐
+//!                              │ Initialize Components    │
+//!                              │ • Symbolizer (DWARF)     │
+//!                              │ • Memory range (PIE)     │
+//!                              │ • Event processor        │
+//!                              │ • Optional: Exporter     │
+//!                              └─────────┬────────────────┘
+//!                                        │
+//!                       ┌────────────────┼────────────────┐
+//!                       │                │                │
+//!              --headless?               │                │
+//!                       │                │                │
+//!            ┌──────────▼──────────┐     │     ┌─────────▼──────────┐
+//!            │ Mode 3: Headless    │     │     │ Mode 2: Live TUI   │
+//!            │ • No TUI thread     │     │     │ • Spawn TUI thread │
+//!            │ • Log to stdout     │     │     │ • Create channel   │
+//!            └──────────┬──────────┘     │     └─────────┬──────────┘
+//!                       │                │               │
+//!                       └────────────────┼───────────────┘
+//!                                        │
+//!                              ┌─────────▼────────────────┐
+//!                              │ Main Event Loop          │
+//!                              │ • Read ring buffer       │
+//!                              │ • Process events         │
+//!                              │ • Send to TUI (if live)  │
+//!                              │ • Export (if enabled)    │
+//!                              │ • Ctrl+C / --duration    │
+//!                              └─────────┬────────────────┘
+//!                                        │
+//!                              ┌─────────▼────────────────┐
+//!                              │ Cleanup & Export         │
+//!                              │ • Wait for TUI thread    │
+//!                              │ • Write trace.json       │
+//!                              │ • Print statistics       │
+//!                              └──────────────────────────┘
+//! ```
+//!
+//! ## Key Components Initialization
+//!
+//! 1. **eBPF Setup** (`profiling::ebpf_setup`):
+//!    - Load compiled eBPF bytecode from `target/bpfel-unknown-none/release/hud`
+//!    - Attach uprobes for marker-based detection
+//!    - Attach tracepoint for scheduler-based detection
+//!    - Attach perf_events for stack sampling
+//!
+//! 2. **Symbolization** (`symbolization::Symbolizer`):
+//!    - Load DWARF debug info from target binary
+//!    - Parse `/proc/<pid>/maps` for PIE address adjustment
+//!    - Enable resolution of raw addresses to function/file/line
+//!
+//! 3. **Event Processing** (`profiling::EventProcessor`):
+//!    - Maintains blocking state machine
+//!    - Routes events to TUI channel (live mode)
+//!    - Routes events to exporter (if enabled)
+//!    - Tracks detection statistics
+//!
+//! 4. **TUI Thread** (`tui::run_live`):
+//!    - Runs in separate thread with crossbeam channel
+//!    - Receives events asynchronously from main loop
+//!    - Provides interactive views (Live/Hotspots/Raw)
+//!    - Exits when channel closes
+//!
+//! ## Termination Conditions
+//!
+//! The main event loop exits when:
+//! - **Ctrl+C**: User interrupts (SIGINT)
+//! - **Duration limit**: `--duration <seconds>` expires
+//! - **Error**: Unrecoverable error in eBPF or event processing
+
 // Main function is intentionally long for clarity; time conversions lose precision for display
 #![allow(
     clippy::too_many_lines,

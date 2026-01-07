@@ -1,3 +1,200 @@
+//! # Runtime Scope - eBPF Kernel-Side Instrumentation
+//!
+//! This module contains the eBPF programs that run **inside the Linux kernel**
+//! to instrument Tokio applications with minimal overhead. eBPF (extended Berkeley
+//! Packet Filter) allows safe, sandboxed code execution in the kernel for observability.
+//!
+//! ## What is eBPF?
+//!
+//! eBPF is a Linux kernel technology that allows running sandboxed programs inside
+//! the kernel without modifying kernel code or loading kernel modules. Key features:
+//!
+//! - **Safety**: Verifier ensures programs terminate and don't crash the kernel
+//! - **Performance**: JIT-compiled to native code, runs at near-native speed
+//! - **Flexibility**: Can attach to various kernel events (tracepoints, kprobes, uprobes)
+//! - **Observability**: Low-overhead instrumentation for profiling and tracing
+//!
+//! ## Architecture: Kernel ↔ Userspace Communication
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────┐
+//! │                      Linux Kernel                           │
+//! │                                                             │
+//! │  ┌──────────────┐   ┌──────────────┐   ┌──────────────┐   │
+//! │  │   Uprobes    │   │ Tracepoints  │   │ Perf Events  │   │
+//! │  │  (marker)    │   │ (sched_sw)   │   │  (99 Hz)     │   │
+//! │  └──────┬───────┘   └──────┬───────┘   └──────┬───────┘   │
+//! │         │                  │                  │            │
+//! │         └──────────────────┼──────────────────┘            │
+//! │                            ▼                                │
+//! │                  ┌──────────────────┐                      │
+//! │                  │  eBPF Programs   │ (this file)          │
+//! │                  │  • Hooks         │                      │
+//! │                  │  • Event logic   │                      │
+//! │                  │  • Stack traces  │                      │
+//! │                  └────────┬─────────┘                      │
+//! │                           │                                 │
+//! │                           ▼                                 │
+//! │                  ┌──────────────────┐                      │
+//! │                  │   eBPF Maps      │                      │
+//! │                  │  • EVENTS (ring) │ ◄─── Shared Memory   │
+//! │                  │  • STACK_TRACES  │                      │
+//! │                  │  • WORKER_INFO   │                      │
+//! │                  └────────┬─────────┘                      │
+//! └───────────────────────────┼─────────────────────────────────┘
+//!                             │
+//!                             │ mmap'd into userspace
+//!                             ▼
+//! ┌─────────────────────────────────────────────────────────────┐
+//! │                     Userspace (hud)                         │
+//! │                                                             │
+//! │   • Poll ring buffer for events (EVENTS.next())            │
+//! │   • Read stack traces (STACK_TRACES.get())                 │
+//! │   • Write config (CONFIG.insert())                         │
+//! │   • Register workers (TOKIO_WORKER_THREADS.insert())       │
+//! └─────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## eBPF Programs (Hooks)
+//!
+//! This file defines several eBPF programs that attach to different kernel events:
+//!
+//! ### 1. Uprobes (Userspace Function Tracing)
+//!
+//! Uprobes dynamically instrument userspace functions by setting breakpoints:
+//!
+//! - **`trace_blocking_start_hook`**: Fires when app calls `trace_blocking_start()`
+//!   - Captures stack trace at blocking operation start
+//!   - Records timestamp for duration calculation
+//!   - **Detection Method**: Marker-based (explicit)
+//!
+//! - **`trace_blocking_end_hook`**: Fires when app calls `trace_blocking_end()`
+//!   - Emits event with duration (calculated in userspace)
+//!   - **Detection Method**: Marker-based (explicit)
+//!
+//! - **`set_task_id_hook`**: Fires when Tokio switches tasks on a worker thread
+//!   - Tracks which Tokio task is executing on each thread
+//!   - **Note**: May be inlined in release builds (opportunistic)
+//!
+//! ### 2. Tracepoints (Kernel Event Tracing)
+//!
+//! Tracepoints are stable kernel ABI for tracing kernel subsystems:
+//!
+//! - **`sched_switch_hook`**: Fires when Linux scheduler switches threads
+//!   - Monitors when Tokio worker threads go ON/OFF CPU
+//!   - Emits start/end events for timeline visualization
+//!   - Detects blocking via threshold heuristic (off-CPU > 5ms)
+//!   - **Detection Method**: Scheduler-based (implicit)
+//!
+//! ### 3. Perf Events (CPU Sampling)
+//!
+//! Perf events are high-frequency timers for statistical profiling:
+//!
+//! - **`on_cpu_sample`**: Fires at 99 Hz (every ~10ms) on each CPU
+//!   - Captures stack traces of what's running
+//!   - Filters by target PID and Tokio worker threads
+//!   - **Detection Method**: Sampling-based (statistical)
+//!
+//! ## eBPF Maps (Shared Data Structures)
+//!
+//! eBPF maps are kernel data structures shared between kernel and userspace:
+//!
+//! ### Communication Maps
+//!
+//! - **`EVENTS` (RingBuf)**: Lock-free ring buffer (256KB) for sending events
+//!   - Kernel writes events with `EVENTS.output()`
+//!   - Userspace polls with `ring_buf.next()`
+//!   - **Purpose**: High-throughput event stream to userspace
+//!
+//! - **`STACK_TRACES` (StackTrace)**: Stores stack traces by ID
+//!   - Kernel captures with `get_stackid()` (deduplicates identical stacks)
+//!   - Userspace resolves addresses to symbols via DWARF
+//!   - **Purpose**: Efficient stack trace storage (IDs instead of full traces)
+//!
+//! ### Configuration Maps
+//!
+//! - **`CONFIG` (HashMap<u32, u64>)**: Configuration from userspace
+//!   - Key 0: Blocking threshold in nanoseconds (default: 5ms)
+//!   - Key 1: Target PID for perf_event filtering
+//!   - **Purpose**: Runtime configuration without recompiling eBPF
+//!
+//! - **`TOKIO_WORKER_THREADS` (HashMap<TID, WorkerInfo>)**: Worker registry
+//!   - Populated by userspace after discovering workers via `/proc`
+//!   - Used to filter events to only Tokio workers
+//!   - **Purpose**: Distinguish worker threads from other threads
+//!
+//! ### State Tracking Maps
+//!
+//! - **`THREAD_TASK_MAP` (HashMap<TID, TaskID>)**: Thread → Tokio Task mapping
+//!   - Updated by `set_task_id_hook` when tasks switch
+//!   - **Purpose**: Attribute blocking to specific async tasks
+//!
+//! - **`THREAD_STATE` (HashMap<TID, ThreadState>)**: Thread execution state
+//!   - Tracks last ON/OFF CPU times, off-CPU duration
+//!   - **Purpose**: Scheduler-based blocking detection
+//!
+//! - **`EXECUTION_SPANS` (HashMap<TID, ExecutionSpan>)**: Current execution span
+//!   - Tracks what each worker is currently executing
+//!   - **Purpose**: Timeline visualization (start/end pairing)
+//!
+//! ### Debug Counters
+//!
+//! - **`PERF_EVENT_COUNTER`**: Total perf_event invocations
+//! - **`PERF_EVENT_PASSED_PID_FILTER`**: Events matching target PID
+//! - **`PERF_EVENT_OUTPUT_SUCCESS/FAILED`**: Ring buffer output stats
+//!
+//! ## Detection Methods
+//!
+//! ### Marker-Based Detection (Method 1)
+//! - **Hooks**: `trace_blocking_start_hook`, `trace_blocking_end_hook`
+//! - **Mechanism**: Explicit instrumentation via uprobes on marker functions
+//! - **Pros**: Zero false positives, precise attribution
+//! - **Cons**: Requires code modification
+//!
+//! ### Scheduler-Based Detection (Method 2)
+//! - **Hook**: `sched_switch_hook`
+//! - **Mechanism**: Detects when thread is off-CPU > threshold (5ms) in TASK_RUNNING state
+//! - **Pros**: No code changes needed
+//! - **Cons**: False positives from legitimate preemption
+//!
+//! ### Sampling-Based Detection (Method 3)
+//! - **Hook**: `on_cpu_sample`
+//! - **Mechanism**: 99 Hz CPU sampling captures stack traces
+//! - **Pros**: Low overhead, whole-program visibility
+//! - **Cons**: Statistical (may miss short events)
+//!
+//! ## Stack Trace Capture
+//!
+//! Stack traces are captured using `bpf_get_stackid()` with flags:
+//! - `BPF_F_USER_STACK (0x100)`: Capture userspace stack (not kernel)
+//! - `BPF_F_FAST_STACK_CMP (0x200)`: Fast comparison for deduplication
+//!
+//! The verifier ensures stack unwinding is safe and bounded. Stack traces
+//! are stored by ID (hash) in `STACK_TRACES` map, and userspace resolves
+//! addresses to function names using DWARF debug information.
+//!
+//! ## Safety and Verification
+//!
+//! eBPF programs are verified by the kernel to ensure:
+//! - **Termination**: No unbounded loops (all loops have provable bounds)
+//! - **Memory Safety**: No out-of-bounds access, null pointer derefs
+//! - **Resource Limits**: Limited stack size (512 bytes), instruction count
+//! - **Privilege**: Cannot escalate privileges or bypass security
+//!
+//! Programs that fail verification are rejected at load time.
+//!
+//! ## Compilation
+//!
+//! eBPF programs are compiled to BPF bytecode using:
+//! - **Toolchain**: Rust nightly with `bpfel-unknown-none` target
+//! - **Build Command**: `cargo xtask build-ebpf` (always release mode)
+//! - **Output**: `target/bpfel-unknown-none/release/hud` (bytecode)
+//! - **Loaded by**: `Ebpf::load()` in userspace (hud/src/main.rs)
+//!
+//! **Note**: Always build in release mode because debug builds include
+//! formatting code (`LowerHex`) that's incompatible with BPF linker.
+//! Release mode uses LTO to eliminate dead code.
+
 #![no_std]
 #![no_main]
 #![allow(unused_unsafe)]
@@ -14,55 +211,96 @@ use hud_common::{
     EVENT_BLOCKING_START, EVENT_SCHEDULER_DETECTED, TRACE_EXECUTION_END, TRACE_EXECUTION_START,
 };
 
-// Ring buffer for sending events to userspace
+// ============================================================================
+// eBPF Maps - Shared data structures between kernel and userspace
+// ============================================================================
+
+/// Ring buffer for sending events to userspace (lock-free, high-throughput)
+///
+/// - **Size**: 256KB (configurable)
+/// - **Type**: LIFO ring buffer (overwrite oldest on overflow)
+/// - **Usage**: Kernel writes with `EVENTS.output()`, userspace reads with `ring_buf.next()`
 #[map]
 static EVENTS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0); // 256KB buffer
 
-// Stack trace map for storing stack traces
+/// Stack trace map for storing deduplicated stack traces by ID
+///
+/// - **Max Entries**: 1024 unique stacks
+/// - **Key**: Stack hash (computed by kernel)
+/// - **Value**: Array of instruction pointers (addresses)
+/// - **Usage**: Kernel captures with `get_stackid()`, userspace resolves with DWARF
 #[map]
 static STACK_TRACES: StackTrace = StackTrace::with_max_entries(1024, 0);
 
-// Map: Thread ID (TID) → Tokio Task ID
-// Tracks which task is currently running on each thread
+/// Map: Thread ID (TID) → Tokio Task ID
+///
+/// Tracks which async task is currently running on each thread.
+/// Updated by `set_task_id_hook` when Tokio switches tasks.
+/// Allows attributing blocking operations to specific tasks.
 #[map]
 static THREAD_TASK_MAP: HashMap<u32, u64> = HashMap::with_max_entries(1024, 0);
 
-// Phase 3a: New maps for scheduler-based detection
-
-// Map: Thread ID (TID) → Thread execution state
-// Tracks when threads go on/off CPU for blocking detection
+/// Map: Thread ID (TID) → Thread execution state
+///
+/// Tracks when threads go ON/OFF CPU for scheduler-based blocking detection.
+/// - **last_on_cpu_ns**: Timestamp when thread was last scheduled
+/// - **last_off_cpu_ns**: Timestamp when thread was last preempted
+/// - **off_cpu_duration**: How long thread was off-CPU (for threshold check)
+/// - **state_when_switched**: Linux task state (0=TASK_RUNNING, 1=TASK_INTERRUPTIBLE, etc.)
 #[map]
 static THREAD_STATE: HashMap<u32, ThreadState> = HashMap::with_max_entries(4096, 0);
 
-// Map: Thread ID (TID) → Worker metadata
-// Tracks which threads are Tokio worker threads
+/// Map: Thread ID (TID) → Worker metadata
+///
+/// Registry of Tokio worker threads, populated by userspace after discovery.
+/// Used to filter events to only Tokio workers (not other threads).
+/// - **worker_id**: Tokio worker index (0, 1, 2, ...)
+/// - **pid**: Process ID (TGID)
+/// - **comm**: Thread name (e.g., "tokio-runtime-w")
 #[map]
 static TOKIO_WORKER_THREADS: HashMap<u32, WorkerInfo> = HashMap::with_max_entries(256, 0);
 
-// Map: Config key → Config value
-// Configuration from userspace (threshold, etc.)
+/// Map: Config key → Config value
+///
+/// Configuration passed from userspace without recompiling eBPF.
+/// - **Key 0**: Blocking threshold in nanoseconds (default: 5,000,000 = 5ms)
+/// - **Key 1**: Target PID for perf_event filtering
 #[map]
 static CONFIG: HashMap<u32, u64> = HashMap::with_max_entries(16, 0);
 
-// Phase 3+: Timeline visualization maps
-
-// Map: Thread ID (TID) → Current execution span
-// Tracks what each worker is currently executing for timeline viz
+/// Map: Thread ID (TID) → Current execution span
+///
+/// Tracks what each worker is currently executing for timeline visualization.
+/// Spans are created on thread ON-CPU (sched_switch) and completed on OFF-CPU.
+/// - **start_time_ns**: When execution started
+/// - **stack_id**: Stack trace ID at execution start
+/// - **cpu_id**: CPU where execution is happening
 #[map]
 static EXECUTION_SPANS: HashMap<u32, ExecutionSpan> = HashMap::with_max_entries(256, 0);
 
-// DEBUG: Counters to verify perf_event is being called and track filtering
+// ============================================================================
+// Debug Counters - Diagnostic metrics for perf_event monitoring
+// ============================================================================
+
+/// Total number of perf_event invocations (verifies hook is firing)
 #[map]
 static PERF_EVENT_COUNTER: HashMap<u32, u64> = HashMap::with_max_entries(1, 0);
 
+/// Number of perf_events that passed PID filter (matched target process)
 #[map]
 static PERF_EVENT_PASSED_PID_FILTER: HashMap<u32, u64> = HashMap::with_max_entries(1, 0);
 
+/// Number of successful ring buffer writes from perf_event
 #[map]
 static PERF_EVENT_OUTPUT_SUCCESS: HashMap<u32, u64> = HashMap::with_max_entries(1, 0);
 
+/// Number of failed ring buffer writes from perf_event (ring buffer full)
 #[map]
 static PERF_EVENT_OUTPUT_FAILED: HashMap<u32, u64> = HashMap::with_max_entries(1, 0);
+
+// ============================================================================
+// eBPF Program Hooks
+// ============================================================================
 
 /// Hook: trace_blocking_start()
 #[uprobe]

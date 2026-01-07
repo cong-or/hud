@@ -1,4 +1,161 @@
-//! eBPF program loading and setup
+//! # eBPF Program Loading and Attachment
+//!
+//! This module handles the initialization and setup of eBPF programs for
+//! Runtime Scope profiling. It provides functions to:
+//! - Load compiled eBPF bytecode into the kernel
+//! - Attach uprobes to userspace functions
+//! - Register Tokio worker threads for filtering
+//! - Setup scheduler-based detection via tracepoints and perf events
+//!
+//! ## eBPF Attachment Overview
+//!
+//! eBPF programs must be **attached** to specific hook points in the kernel:
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────┐
+//! │                    User Application                         │
+//! │                                                             │
+//! │  trace_blocking_start()  ◄─── Uprobe (marker-based)       │
+//! │  trace_blocking_end()    ◄─── Uprobe (marker-based)       │
+//! │  set_current_task_id()   ◄─── Uprobe (task tracking)      │
+//! └─────────────────────────────────────────────────────────────┘
+//!                        │
+//!                        │ context switch
+//!                        ▼
+//! ┌─────────────────────────────────────────────────────────────┐
+//! │                    Linux Kernel                             │
+//! │                                                             │
+//! │  sched/sched_switch      ◄─── Tracepoint (scheduler)       │
+//! │  perf_event (99 Hz)      ◄─── Perf Event (sampling)        │
+//! └─────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Uprobes (Userspace Probes)
+//!
+//! **Uprobes** are dynamic instrumentation points for userspace functions.
+//! They work by:
+//! 1. Parsing the target binary's symbol table (ELF)
+//! 2. Setting a **breakpoint** (`int3` on x86) at the function's entry
+//! 3. When the breakpoint hits, kernel traps and calls the eBPF program
+//! 4. eBPF program executes, then returns control to the original function
+//!
+//! **Performance**: Each uprobe adds ~1-2μs overhead per invocation. This is
+//! acceptable for infrequent operations (like blocking markers) but would be
+//! prohibitive for hot paths (like all function calls).
+//!
+//! ### Marker-Based Detection Uprobes
+//!
+//! Runtime Scope attaches uprobes to two marker functions:
+//! - `trace_blocking_start()`: Called before blocking operations
+//! - `trace_blocking_end()`: Called after blocking operations
+//!
+//! **Application code**:
+//! ```rust,ignore
+//! #[no_mangle]
+//! extern "C" fn trace_blocking_start() {}
+//!
+//! fn expensive_operation() {
+//!     trace_blocking_start();
+//!     // ... synchronous work ...
+//!     trace_blocking_end();
+//! }
+//! ```
+//!
+//! **Symbol Resolution**: The uprobe attachment requires:
+//! - Symbol must be **exported** (`#[no_mangle]`, `extern "C"`)
+//! - Symbol name must be in the binary's symbol table (`nm <binary>`)
+//! - Symbol must not be inlined (disable LTO for markers)
+//!
+//! ### Task ID Tracking Uprobe
+//!
+//! Tokio internally calls `set_current_task_id()` when switching tasks on a
+//! worker thread. We attach a uprobe to this function to track which async
+//! task is currently executing on each thread.
+//!
+//! **Challenge**: This function is often **inlined** in release builds, making
+//! it impossible to attach a uprobe. Runtime Scope handles this gracefully by
+//! detecting the attachment failure and continuing without task IDs.
+//!
+//! **Mangled Symbol**: Rust mangles function names:
+//! ```text
+//! tokio::runtime::context::set_current_task_id
+//!   → _ZN5tokio7runtime7context19set_current_task_id17h88510a52941c215fE
+//! ```
+//!
+//! ## Worker Thread Discovery
+//!
+//! Before attaching probes, we must identify which threads are Tokio workers.
+//! This is done by inspecting `/proc/<pid>/task/<tid>/comm`:
+//!
+//! ```text
+//! /proc/12345/task/
+//!   ├── 12345/comm → "main"
+//!   ├── 12346/comm → "tokio-runtime-w"  ✓ Worker thread 0
+//!   ├── 12347/comm → "tokio-runtime-w"  ✓ Worker thread 1
+//!   └── 12348/comm → "blocking-1"       ✗ Blocking thread pool
+//! ```
+//!
+//! Workers are registered in the `TOKIO_WORKER_THREADS` eBPF map, which the
+//! kernel-side eBPF programs use to filter events to only Tokio workers.
+//!
+//! ## Scheduler-Based Detection Setup
+//!
+//! Scheduler-based detection uses two kernel mechanisms:
+//!
+//! ### 1. Tracepoint: `sched/sched_switch`
+//!
+//! **What it is**: Stable kernel API for tracing scheduler events.
+//! Fires every time the Linux scheduler switches threads (context switch).
+//!
+//! **Why we use it**: Detect when Tokio workers go ON/OFF CPU:
+//! - **ON-CPU** (thread becomes `next_pid`): Start execution span
+//! - **OFF-CPU** (thread becomes `prev_pid`): End execution span, check threshold
+//!
+//! **Overhead**: High - fires on every context switch (thousands per second).
+//! Mitigated by filtering to only Tokio worker threads in eBPF.
+//!
+//! ### 2. Perf Event: CPU Sampling at 99 Hz
+//!
+//! **What it is**: Periodic timer-based sampling for CPU profiling.
+//! Fires 99 times per second on each CPU core.
+//!
+//! **Why we use it**: Capture stack traces of what's currently executing
+//! for statistical flame graph analysis.
+//!
+//! **Why 99 Hz**: Prime number to avoid aliasing with other periodic events
+//! (like 100 Hz system timer). Standard for CPU profiling.
+//!
+//! **Filtering**: Perf events fire on **all processes**, so we filter by PID
+//! in the eBPF program using the `CONFIG` map.
+//!
+//! ## Setup Sequence
+//!
+//! The typical initialization sequence in `main.rs`:
+//!
+//! ```rust,ignore
+//! // 1. Load eBPF bytecode from embedded binary
+//! let mut bpf = load_ebpf_program()?;
+//!
+//! // 2. Initialize eBPF logging (optional)
+//! init_ebpf_logger(&mut bpf);
+//!
+//! // 3. Attach marker-based detection uprobes
+//! let task_id_attached = attach_blocking_uprobes(&mut bpf, &target_path, Some(pid))?;
+//!
+//! // 4. Setup scheduler-based detection (tracepoints + perf events)
+//! let worker_count = setup_scheduler_detection(&mut bpf, pid)?;
+//!
+//! // 5. Get ring buffer and start event processing
+//! let ring_buf = RingBuf::try_from(bpf.take_map("EVENTS")?)?;
+//! ```
+//!
+//! ## Configuration via eBPF Maps
+//!
+//! Configuration is passed to eBPF programs via the `CONFIG` map:
+//! - **Key 0**: Blocking threshold in nanoseconds (default: 5,000,000 = 5ms)
+//! - **Key 1**: Target PID for perf_event filtering
+//!
+//! This allows runtime configuration without recompiling the eBPF program.
 
 use anyhow::{Context, Result};
 use aya::{
