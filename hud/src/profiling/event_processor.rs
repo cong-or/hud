@@ -1,13 +1,10 @@
-//! # Event Processing and State Machine
+//! # Event Processing
 //!
 //! Consumes events from eBPF ring buffer and routes them to appropriate handlers.
-//! Maintains state machine for pairing START/END events in marker-based detection.
 //!
 //! ## Event Routing
 //!
-//! - `EVENT_BLOCKING_START` → Store state, wait for END
-//! - `EVENT_BLOCKING_END` → Calculate duration, output result
-//! - `EVENT_SCHEDULER_DETECTED` → Off-CPU threshold exceeded
+//! - `EVENT_SCHEDULER_DETECTED` → Off-CPU threshold exceeded (blocking detection)
 //! - `TRACE_EXECUTION_{START,END}` → Timeline visualization
 //!
 //! ## Output Modes
@@ -20,28 +17,16 @@
 
 use aya::maps::StackTraceMap;
 use crossbeam_channel::Sender;
-use hud_common::{
-    TaskEvent, EVENT_BLOCKING_END, EVENT_BLOCKING_START, EVENT_SCHEDULER_DETECTED,
-    TRACE_EXECUTION_END, TRACE_EXECUTION_START,
-};
+use hud_common::{TaskEvent, EVENT_SCHEDULER_DETECTED, TRACE_EXECUTION_END, TRACE_EXECUTION_START};
 use log::warn;
 
 use super::{
-    display_blocking_end, display_blocking_end_no_start, display_blocking_start,
-    display_execution_event, display_scheduler_detected, DetectionStats, MemoryRange,
-    StackResolver,
+    display_execution_event, display_scheduler_detected, DetectionStats, MemoryRange, StackResolver,
 };
 use crate::domain::StackId;
 use crate::export::TraceEventExporter;
 use crate::symbolization::Symbolizer;
 use crate::trace_data::TraceEvent;
-
-/// Blocking state tracking for marker-based detection
-#[derive(Debug, Clone, Copy)]
-struct BlockingState {
-    start_time_ns: u64,
-    stack_id: i64,
-}
 
 /// Encapsulates event processing logic and state
 pub struct EventProcessor<'a> {
@@ -49,7 +34,6 @@ pub struct EventProcessor<'a> {
     headless: bool,
 
     // Mutable state
-    blocking_state: Option<BlockingState>,
     pub stats: DetectionStats,
     pub event_count: usize,
 
@@ -76,7 +60,6 @@ impl<'a> EventProcessor<'a> {
     ) -> Self {
         Self {
             headless,
-            blocking_state: None,
             stats: DetectionStats::default(),
             event_count: 0,
             stack_resolver,
@@ -96,8 +79,6 @@ impl<'a> EventProcessor<'a> {
         self.event_count += 1;
 
         match event.event_type {
-            EVENT_BLOCKING_START => self.handle_blocking_start(event),
-            EVENT_BLOCKING_END => self.handle_blocking_end(event, stack_traces),
             EVENT_SCHEDULER_DETECTED => self.handle_scheduler_detected(event, stack_traces),
             TRACE_EXECUTION_START | TRACE_EXECUTION_END => {
                 self.handle_trace_execution(event, stack_traces);
@@ -114,39 +95,6 @@ impl<'a> EventProcessor<'a> {
     }
 
     // Private event handlers
-
-    fn handle_blocking_start(&mut self, event: TaskEvent) {
-        self.blocking_state =
-            Some(BlockingState { start_time_ns: event.timestamp_ns, stack_id: event.stack_id });
-
-        if self.headless {
-            display_blocking_start(&event);
-        }
-    }
-
-    fn handle_blocking_end<T: std::borrow::Borrow<aya::maps::MapData>>(
-        &mut self,
-        event: TaskEvent,
-        stack_traces: &StackTraceMap<T>,
-    ) {
-        if let Some(state) = self.blocking_state {
-            self.stats.marker_detected += 1;
-
-            if self.headless {
-                display_blocking_end(
-                    &event,
-                    state.start_time_ns,
-                    Some(state.stack_id),
-                    &self.stack_resolver,
-                    stack_traces,
-                );
-            }
-
-            self.blocking_state = None;
-        } else if self.headless {
-            display_blocking_end_no_start(&event);
-        }
-    }
 
     fn handle_scheduler_detected<T: std::borrow::Borrow<aya::maps::MapData>>(
         &mut self,

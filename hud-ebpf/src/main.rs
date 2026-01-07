@@ -4,7 +4,6 @@
 //!
 //! ## Programs
 //!
-//! - **Uprobes**: `trace_blocking_{start,end}_hook`, `set_task_id_hook` - Marker-based detection
 //! - **Tracepoint**: `sched_switch_hook` - Scheduler-based detection (off-CPU > 5ms)
 //! - **Perf Event**: `on_cpu_sample` - CPU sampling at 99 Hz for stack traces
 //!
@@ -36,8 +35,8 @@ use aya_ebpf::{
     EbpfContext,
 };
 use hud_common::{
-    ExecutionSpan, SchedSwitchArgs, TaskEvent, ThreadState, WorkerInfo, EVENT_BLOCKING_END,
-    EVENT_BLOCKING_START, EVENT_SCHEDULER_DETECTED, TRACE_EXECUTION_END, TRACE_EXECUTION_START,
+    ExecutionSpan, SchedSwitchArgs, TaskEvent, ThreadState, WorkerInfo, EVENT_SCHEDULER_DETECTED,
+    TRACE_EXECUTION_END, TRACE_EXECUTION_START,
 };
 
 // ============================================================================
@@ -130,98 +129,6 @@ static PERF_EVENT_OUTPUT_FAILED: HashMap<u32, u64> = HashMap::with_max_entries(1
 // ============================================================================
 // eBPF Program Hooks
 // ============================================================================
-
-/// Hook: trace_blocking_start()
-#[uprobe]
-pub fn trace_blocking_start_hook(ctx: ProbeContext) -> u32 {
-    match try_trace_blocking_start(&ctx) {
-        Ok(_) => 0,
-        Err(_) => 1,
-    }
-}
-
-fn try_trace_blocking_start(ctx: &ProbeContext) -> Result<(), i64> {
-    // Get current process/thread info
-    let pid_tgid = unsafe { bpf_get_current_pid_tgid() };
-    let pid = (pid_tgid >> 32) as u32; // Process ID (TGID)
-    let tid = pid_tgid as u32; // Thread ID (PID)
-    let timestamp_ns = unsafe { bpf_ktime_get_ns() };
-
-    // Capture stack trace - use BPF_F_USER_STACK (0x100) | BPF_F_FAST_STACK_CMP (0x200)
-    let stack_id = unsafe { STACK_TRACES.get_stackid(ctx, 0x300).unwrap_or(-1) };
-
-    // Look up current task ID for this thread
-    let task_id = unsafe { THREAD_TASK_MAP.get(&tid).copied().unwrap_or(0) };
-
-    // Create event
-    let event = TaskEvent {
-        pid,
-        tid,
-        timestamp_ns,
-        event_type: EVENT_BLOCKING_START,
-        stack_id,
-        duration_ns: 0, // Will be calculated in userspace
-        worker_id: get_worker_id(tid),
-        cpu_id: get_cpu_id(),
-        thread_state: 0, // Not applicable for marker detection
-        task_id,
-        category: 0,         // 0 = general
-        detection_method: 1, // 1 = marker-based
-        is_tokio_worker: if is_tokio_worker(tid) { 1 } else { 0 },
-        _padding: [0u8; 5],
-    };
-
-    // Send to userspace via ring buffer
-    EVENTS.output(&event, 0).map_err(|_| 1i64)?;
-
-    Ok(())
-}
-
-/// Hook: trace_blocking_end()
-#[uprobe]
-pub fn trace_blocking_end_hook(ctx: ProbeContext) -> u32 {
-    match try_trace_blocking_end(&ctx) {
-        Ok(_) => 0,
-        Err(_) => 1,
-    }
-}
-
-fn try_trace_blocking_end(ctx: &ProbeContext) -> Result<(), i64> {
-    // Get current process/thread info
-    let pid_tgid = unsafe { bpf_get_current_pid_tgid() };
-    let pid = (pid_tgid >> 32) as u32; // Process ID (TGID)
-    let tid = pid_tgid as u32; // Thread ID (PID)
-    let timestamp_ns = unsafe { bpf_ktime_get_ns() };
-
-    // Capture stack trace - use BPF_F_USER_STACK (0x100) | BPF_F_FAST_STACK_CMP (0x200)
-    let stack_id = unsafe { STACK_TRACES.get_stackid(ctx, 0x300).unwrap_or(-1) };
-
-    // Look up current task ID for this thread
-    let task_id = unsafe { THREAD_TASK_MAP.get(&tid).copied().unwrap_or(0) };
-
-    // Create event
-    let event = TaskEvent {
-        pid,
-        tid,
-        timestamp_ns,
-        event_type: EVENT_BLOCKING_END,
-        stack_id,
-        duration_ns: 0, // Will be calculated in userspace
-        worker_id: get_worker_id(tid),
-        cpu_id: get_cpu_id(),
-        thread_state: 0, // Not applicable for marker detection
-        task_id,
-        category: 0,         // 0 = general
-        detection_method: 1, // 1 = marker-based
-        is_tokio_worker: if is_tokio_worker(tid) { 1 } else { 0 },
-        _padding: [0u8; 5],
-    };
-
-    // Send to userspace via ring buffer
-    EVENTS.output(&event, 0).map_err(|_| 1i64)?;
-
-    Ok(())
-}
 
 /// Hook: tokio::runtime::context::set_current_task_id
 /// Called when a task starts executing on a thread

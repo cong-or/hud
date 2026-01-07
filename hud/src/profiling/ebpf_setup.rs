@@ -5,13 +5,13 @@
 //! ## Functions
 //!
 //! - [`load_ebpf_program()`] - Load eBPF bytecode from embedded binary
-//! - [`attach_blocking_uprobes()`] - Attach uprobes for marker-based detection
+//! - [`attach_task_id_uprobe()`] - Attach uprobe for task ID tracking
 //! - [`register_tokio_workers()`] - Discover and register Tokio worker threads
 //! - [`setup_scheduler_detection()`] - Attach tracepoints and perf events
 //!
 //! ## Attachment Points
 //!
-//! - **Uprobes**: `trace_blocking_{start,end}()`, `set_current_task_id()`
+//! - **Uprobe**: `set_current_task_id()` (Tokio task tracking)
 //! - **Tracepoint**: `sched/sched_switch` (context switches)
 //! - **Perf Event**: CPU sampling at 99 Hz
 //!
@@ -51,30 +51,12 @@ pub fn init_ebpf_logger(bpf: &mut Ebpf) {
     }
 }
 
-/// Attach blocking marker uprobes (`trace_blocking_start`, `trace_blocking_end`, `set_task_id`)
-/// Returns true if `task_id` tracking is available
+/// Attach task ID tracking uprobe (`set_current_task_id`)
+/// Returns true if task ID tracking is available
 ///
 /// # Errors
 /// Returns an error if uprobe attachment fails
-pub fn attach_blocking_uprobes(
-    bpf: &mut Ebpf,
-    target_path: &str,
-    pid: Option<i32>,
-) -> Result<bool> {
-    // Attach uprobe to trace_blocking_start
-    let program: &mut UProbe =
-        bpf.program_mut("trace_blocking_start_hook").context("program not found")?.try_into()?;
-    program.load()?;
-    program.attach(Some("trace_blocking_start"), 0, target_path, pid)?;
-    info!("✓ Attached uprobe: trace_blocking_start");
-
-    // Attach uprobe to trace_blocking_end
-    let program: &mut UProbe =
-        bpf.program_mut("trace_blocking_end_hook").context("program not found")?.try_into()?;
-    program.load()?;
-    program.attach(Some("trace_blocking_end"), 0, target_path, pid)?;
-    info!("✓ Attached uprobe: trace_blocking_end");
-
+pub fn attach_task_id_uprobe(bpf: &mut Ebpf, target_path: &str, pid: Option<i32>) -> Result<bool> {
     // Attach uprobe to tokio::runtime::context::set_current_task_id
     // Note: This symbol may not exist in release builds (gets inlined)
     let task_id_attached = if let Some(program) = bpf.program_mut("set_task_id_hook") {

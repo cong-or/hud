@@ -12,7 +12,6 @@ A comprehensive test application designed to exercise hud's profiling features.
 - **1 blocking task**: Does 450ms of CPU work without yielding (creates hot function for profiling)
 - **200+ quick tasks**: Spawned in bursts to create varied activity patterns
 - **Runs continuously** until stopped
-- **Marker functions**: Instrumented with `trace_blocking_start/end` for demonstration
 
 ### Running the test
 
@@ -146,21 +145,6 @@ while start.elapsed() < Duration::from_millis(450) {
 ```
 
 This simulates CPU-bound work that doesn't yield to the executor, making it easy to spot in the profiler.
-
-**Marker Functions (legacy demonstration):**
-
-The app also includes `#[no_mangle]` marker functions for demonstration:
-```rust
-#[no_mangle]
-#[inline(never)]
-fn trace_blocking_start() { }
-
-#[no_mangle]
-#[inline(never)]
-fn trace_blocking_end() { }
-```
-
-These are called before/after the blocking work but are NOT required for profiling (perf_event captures everything).
 
 ## test-single-thread
 

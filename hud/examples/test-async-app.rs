@@ -11,75 +11,6 @@
 use std::time::Duration;
 use tokio::time::sleep;
 
-// ==============================================================================
-// MARKER FUNCTIONS FOR EBPF TRACING (PHASE 3a: DUAL DETECTION MODE)
-// ==============================================================================
-// 🔬 PHASE 3a: Running BOTH detection methods for validation!
-//
-// Current Status:
-//   - Marker-based detection: ✅ Active (for comparison)
-//   - Scheduler-based detection: ✅ Active (under validation)
-//
-// Marker Detection (Phase 1-2):
-//   - Uses #[no_mangle] functions + eBPF uprobes
-//   - Requires explicit trace_blocking_start/end calls
-//   - Ground truth for validating scheduler detection
-//
-// Scheduler Detection (Phase 3a - NEW!):
-//   - Uses sched_switch tracepoint (kernel scheduler events)
-//   - Detects blocking automatically (no markers needed!)
-//   - Monitors when Tokio worker threads go off-CPU
-//   - Heuristic: thread off-CPU >5ms in TASK_RUNNING state = blocking
-//
-// How It Works (Phase 3a):
-//   1. blocking_task() calls trace_blocking_start() → 🔵 MARKER DETECTED
-//   2. blocking_task() blocks CPU for 450ms
-//   3. Scheduler switches thread off-CPU → 🟢 SCHEDULER DETECTED
-//   4. Both events shown in output for comparison!
-//
-// Success Metrics:
-//   - Scheduler should detect same events as markers
-//   - Both methods report similar durations
-//   - <10% false positives/negatives
-//
-// Timeline:
-//   Phase 1: ✅ Basic blocking detection with markers
-//   Phase 2: ✅ Stack traces + async task tracking
-//   Phase 3a: 🔬 Hybrid mode (CURRENT) - both methods active
-//   Phase 3b: 🎯 Scheduler-only (markers optional)
-//   Phase 3c: 🚀 Production (zero instrumentation)
-//
-// These markers will be removed in Phase 3c!
-
-#[allow(unsafe_code)]
-#[no_mangle]
-#[inline(never)]
-extern "C" fn trace_task_start(task_id: u64) {
-    // Empty - just a hook point for eBPF
-    std::hint::black_box(task_id);
-}
-
-#[allow(unsafe_code)]
-#[no_mangle]
-#[inline(never)]
-extern "C" fn trace_task_end(task_id: u64) {
-    std::hint::black_box(task_id);
-}
-
-#[allow(unsafe_code)]
-#[no_mangle]
-#[inline(never)]
-extern "C" fn trace_blocking_start() {
-    std::hint::black_box(());
-}
-
-#[allow(unsafe_code)]
-#[no_mangle]
-#[inline(never)]
-extern "C" fn trace_blocking_end() {
-    std::hint::black_box(());
-}
-
 #[tokio::main]
 async fn main() {
     println!("🚀 Test Async Application Starting");
@@ -144,12 +75,8 @@ async fn blocking_task() {
 
         println!("  🔴 Blocking task doing heavy CPU work...");
 
-        // eBPF trace point: blocking starts
-        trace_blocking_start();
-
-        // TEST: Heavy CPU-bound work that will get preempted by scheduler
-        // This should trigger TASK_RUNNING state detection!
-        // We do enough work to take ~500ms, forcing scheduler preemptions
+        // Heavy CPU-bound work that will get preempted by scheduler
+        // This triggers TASK_RUNNING state detection via sched_switch
         let mut result = 0u64;
         let start = std::time::Instant::now();
 
@@ -160,9 +87,6 @@ async fn blocking_task() {
                 result = result.wrapping_add(std::hint::black_box(1));
             }
         }
-
-        // eBPF trace point: blocking ends
-        trace_blocking_end();
 
         println!("  🔴 Blocking task finished CPU work (result: {result})");
         println!("      ^ This blocked the executor for ~450ms!");

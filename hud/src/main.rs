@@ -30,7 +30,7 @@ use std::time::{Duration, Instant};
 // Import modules
 use hud::cli::Args;
 use hud::profiling::{
-    attach_blocking_uprobes, display_statistics, init_ebpf_logger, load_ebpf_program,
+    attach_task_id_uprobe, display_statistics, init_ebpf_logger, load_ebpf_program,
     print_perf_event_diagnostics, setup_scheduler_detection, EventProcessor, StackResolver,
 };
 use hud::trace_data::TraceData;
@@ -81,8 +81,8 @@ async fn main() -> Result<()> {
     // Initialize logging from eBPF
     init_ebpf_logger(&mut bpf);
 
-    // Attach blocking marker uprobes
-    let task_id_attached = attach_blocking_uprobes(&mut bpf, &target_path, Some(pid))?;
+    // Attach task ID tracking uprobe (optional - may be inlined in release builds)
+    let task_id_attached = attach_task_id_uprobe(&mut bpf, &target_path, Some(pid))?;
 
     if !task_id_attached {
         println!("⚠️  Note: Task IDs unavailable (set_current_task_id inlined in release build)");

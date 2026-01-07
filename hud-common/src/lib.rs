@@ -6,11 +6,10 @@
 //!
 //! ## Detection Methods
 //!
-//! Three complementary approaches (see [Architecture](../../docs/ARCHITECTURE.md) for details):
+//! Two complementary approaches (see [Architecture](../../docs/ARCHITECTURE.md) for details):
 //!
-//! 1. **Marker-Based** - Explicit `trace_blocking_{start,end}()` calls (zero false positives)
-//! 2. **Scheduler-Based** - Monitor `sched_switch` for off-CPU > 5ms (no code changes)
-//! 3. **Sampling-Based** - CPU sampling at 99 Hz (statistical profiling)
+//! 1. **Scheduler-Based** - Monitor `sched_switch` for off-CPU > 5ms (no code changes)
+//! 2. **Sampling-Based** - CPU sampling at 99 Hz (statistical profiling)
 //!
 //! ## Key Types
 //!
@@ -24,20 +23,6 @@
 // ============================================================================
 // Event Type Constants
 // ============================================================================
-
-/// **Marker-Based Detection**: Blocking operation started
-///
-/// Emitted by: `trace_blocking_start_hook` uprobe
-/// Paired with: `EVENT_BLOCKING_END`
-/// Detection Method: 1 (marker)
-pub const EVENT_BLOCKING_START: u32 = 1;
-
-/// **Marker-Based Detection**: Blocking operation ended
-///
-/// Emitted by: `trace_blocking_end_hook` uprobe
-/// Paired with: `EVENT_BLOCKING_START`
-/// Detection Method: 1 (marker)
-pub const EVENT_BLOCKING_END: u32 = 2;
 
 /// **Scheduler-Based Detection**: Blocking detected via off-CPU threshold
 ///
@@ -191,7 +176,6 @@ pub struct TaskEvent {
     /// Detection method that produced this event
     ///
     /// **Values**:
-    /// - `1`: Marker-based (uprobe on `trace_blocking_{start,end}`)
     /// - `2`: Scheduler-based (threshold detection via `sched_switch`)
     /// - `3`: Trace (timeline visualization via `sched_switch`)
     /// - `4`: Sampling (CPU sampling via `perf_event` at 99 Hz)

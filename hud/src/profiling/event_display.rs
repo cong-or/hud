@@ -7,44 +7,6 @@ use aya::maps::{MapData, StackTraceMap};
 use hud_common::TaskEvent;
 use std::borrow::Borrow;
 
-/// Display a blocking start event
-pub fn display_blocking_start(event: &TaskEvent) {
-    println!("🔴 [PID {} TID {}] Blocking started", event.pid, event.tid);
-}
-
-/// Display a blocking end event (marker detection)
-#[allow(clippy::similar_names)]
-pub fn display_blocking_end<T: Borrow<MapData>>(
-    event: &TaskEvent,
-    start_time: u64,
-    stack_id: Option<i64>,
-    stack_resolver: &StackResolver,
-    stack_traces: &StackTraceMap<T>,
-) {
-    let duration_ns = event.timestamp_ns - start_time;
-    let duration_ms = duration_ns as f64 / 1_000_000.0;
-
-    println!("\n🔵 MARKER DETECTED");
-    println!("   Duration: {:.2}ms {}", duration_ms, if duration_ms > 10.0 { "⚠️" } else { "" });
-    println!("   Process: PID {}", event.pid);
-    println!("   Thread: TID {}", event.tid);
-    if event.task_id != 0 {
-        println!("   Task ID: {}", event.task_id);
-    }
-
-    // Print stack trace from blocking start
-    if let Some(stack_id) = stack_id {
-        let _ = stack_resolver.resolve_and_print(StackId(stack_id), stack_traces);
-    }
-
-    println!();
-}
-
-/// Display a blocking end event with no matching start
-pub fn display_blocking_end_no_start(event: &TaskEvent) {
-    println!("  ✓ [PID {} TID {}] Blocking ended (no start time)", event.pid, event.tid);
-}
-
 /// Display a scheduler-detected event
 #[allow(clippy::similar_names)]
 pub fn display_scheduler_detected<T: Borrow<MapData>>(
@@ -97,14 +59,12 @@ pub fn display_execution_event(event: &TaskEvent, is_start: bool) {
 /// Statistics for detection methods
 #[derive(Default)]
 pub struct DetectionStats {
-    pub marker_detected: u64,
     pub scheduler_detected: u64,
 }
 
 /// Display detection statistics
 pub fn display_statistics(stats: &DetectionStats) {
     println!("\n📊 Detection Statistics (last 10s):");
-    println!("   Marker:    {}", stats.marker_detected);
     println!("   Scheduler: {}", stats.scheduler_detected);
     println!();
 }

@@ -21,10 +21,9 @@ pub mod worker_discovery;
 pub use cpu_utils::online_cpus;
 pub use diagnostics::print_perf_event_diagnostics;
 pub use ebpf_setup::{
-    attach_blocking_uprobes, init_ebpf_logger, load_ebpf_program, setup_scheduler_detection,
+    attach_task_id_uprobe, init_ebpf_logger, load_ebpf_program, setup_scheduler_detection,
 };
 pub use event_display::{
-    display_blocking_end, display_blocking_end_no_start, display_blocking_start,
     display_execution_event, display_progress, display_scheduler_detected, display_statistics,
     DetectionStats,
 };

@@ -31,7 +31,7 @@ hud uses eBPF (extended Berkeley Packet Filter) to instrument Tokio applications
 
 ## eBPF Programs
 
-hud loads three types of eBPF programs into the kernel:
+hud loads two types of eBPF programs into the kernel:
 
 ### 1. Tracepoint: sched_switch
 
@@ -63,21 +63,6 @@ Fires at 99 Hz (every ~10ms) on each CPU core.
 
 **Key code:** `hud-ebpf/src/main.rs::on_cpu_sample()`
 
-### 3. Uprobes (Optional)
-
-Dynamic instrumentation of userspace functions.
-
-**Purpose:** Marker-based detection for explicit blocking regions.
-
-**How it works:**
-- Attach to `trace_blocking_start()` function
-- Attach to `trace_blocking_end()` function
-- Calculate precise duration between calls
-
-**Note:** Requires application code changes, but provides zero false positives.
-
-**Key code:** `hud-ebpf/src/main.rs::trace_blocking_start_hook()`
-
 ## Data Structures
 
 ### eBPF Maps
@@ -104,29 +89,16 @@ struct TaskEvent {
     duration_ns: u64,      // Duration (for span events)
     worker_id: u32,        // Tokio worker index
     cpu_id: u32,           // CPU core
-    detection_method: u8,  // 1=marker, 2=sched, 3=trace, 4=sample
+    detection_method: u8,  // 2=sched, 3=trace, 4=sample
     // ...
 }
 ```
 
 ## Detection Methods
 
-hud implements three complementary detection approaches:
+hud implements two complementary detection approaches:
 
-### Method 1: Marker-Based (Explicit)
-
-Application explicitly marks blocking regions:
-
-```rust
-trace_blocking_start();
-expensive_sync_operation();
-trace_blocking_end();
-```
-
-**Pros:** Zero false positives, precise attribution
-**Cons:** Requires code changes
-
-### Method 2: Scheduler-Based (Threshold)
+### Method 1: Scheduler-Based (Threshold)
 
 Monitors scheduler events to detect blocking:
 
@@ -139,7 +111,7 @@ if (off_cpu_duration > 5ms && state == TASK_RUNNING) {
 **Pros:** No code changes, whole-program visibility
 **Cons:** False positives from legitimate preemption
 
-### Method 3: Sampling-Based (Statistical)
+### Method 2: Sampling-Based (Statistical)
 
 CPU sampling at 99 Hz for flame graphs:
 
