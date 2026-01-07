@@ -1,119 +1,23 @@
-//! # Runtime Scope - Shared Data Structures (eBPF ↔ Userspace)
+//! # Shared Data Structures (eBPF ↔ Userspace)
 //!
-//! This crate defines the data structures and constants shared between:
-//! - **eBPF programs** (kernel-side, in `hud-ebpf`)
-//! - **Userspace application** (in `hud`)
-//!
-//! All types use `#[repr(C)]` to ensure consistent memory layout across the
-//! kernel/userspace boundary. This is critical because eBPF programs write
-//! raw bytes to ring buffers, and userspace reads them back as structs.
-//!
-//! ## Why `#![no_std]`?
-//!
-//! eBPF programs run in the kernel and cannot use the Rust standard library.
-//! This crate must be `no_std` to be imported by `hud-ebpf`. Userspace code
-//! can still use `std` via the `hud` crate.
+//! Defines data structures and constants shared between kernel-side eBPF programs
+//! and userspace. All types use `#[repr(C)]` for consistent memory layout across
+//! the kernel/userspace boundary.
 //!
 //! ## Detection Methods
 //!
-//! Runtime Scope implements three complementary approaches to detect blocking
-//! operations in async Tokio runtimes. Each has different tradeoffs:
+//! Three complementary approaches (see [Architecture](../../docs/ARCHITECTURE.md) for details):
 //!
-//! ### Detection Method 1: Marker-Based (Explicit Instrumentation)
+//! 1. **Marker-Based** - Explicit `trace_blocking_{start,end}()` calls (zero false positives)
+//! 2. **Scheduler-Based** - Monitor `sched_switch` for off-CPU > 5ms (no code changes)
+//! 3. **Sampling-Based** - CPU sampling at 99 Hz (statistical profiling)
 //!
-//! **Mechanism**: Application explicitly calls marker functions around blocking code:
-//! ```rust,ignore
-//! trace_blocking_start();
-//! expensive_sync_operation(); // e.g., file I/O, computation
-//! trace_blocking_end();
-//! ```
+//! ## Key Types
 //!
-//! **How it works**:
-//! - Uprobes attach to `trace_blocking_start()` and `trace_blocking_end()` functions
-//! - eBPF captures stack traces and timestamps
-//! - Duration calculated in userspace from paired START/END events
-//!
-//! **Event Types**: `EVENT_BLOCKING_START`, `EVENT_BLOCKING_END`
-//!
-//! **Pros**:
-//! - ✅ Zero false positives (only fires on actual blocking code)
-//! - ✅ Precise attribution (exact location of blocking operation)
-//! - ✅ Minimal overhead (only when markers are hit)
-//!
-//! **Cons**:
-//! - ❌ Requires code modification (must add markers manually)
-//! - ❌ Incomplete coverage (only detects instrumented code)
-//!
-//! **Best for**: Debugging known hot paths where you control the source code
-//!
-//! ### Detection Method 2: Scheduler-Based (Implicit, Threshold-Based)
-//!
-//! **Mechanism**: Monitors Linux scheduler events to detect when threads block:
-//! - Attach to `sched_switch` tracepoint
-//! - Track when Tokio worker threads go ON/OFF CPU
-//! - Report when OFF-CPU duration exceeds threshold (default: 5ms)
-//!
-//! **How it works**:
-//! - Linux scheduler fires `sched_switch` when switching threads
-//! - eBPF tracks `last_on_cpu_ns` and `last_off_cpu_ns` for each worker
-//! - If `(now - last_off_cpu_ns) > threshold` AND `prev_state == TASK_RUNNING`:
-//!   - **TASK_RUNNING (0)**: Thread was CPU-bound (likely blocking compute)
-//!   - **TASK_INTERRUPTIBLE (1)**: Thread yielded (async await) - **NOT** blocking
-//! - Emit `EVENT_SCHEDULER_DETECTED` with stack trace at ON-CPU event
-//!
-//! **Event Types**: `EVENT_SCHEDULER_DETECTED`
-//!
-//! **Pros**:
-//! - ✅ No code changes required (works on any binary)
-//! - ✅ Whole-program visibility (detects all blocking operations)
-//! - ✅ Automatic detection
-//!
-//! **Cons**:
-//! - ❌ False positives from legitimate preemption (kernel preempts CPU-bound tasks)
-//! - ❌ Threshold tuning required (too low = noise, too high = miss short blocks)
-//! - ❌ Higher overhead (fires on every scheduler context switch)
-//!
-//! **Best for**: Profiling production binaries without source code access
-//!
-//! ### Detection Method 3: Sampling-Based (Statistical CPU Profiling)
-//!
-//! **Mechanism**: Periodic stack sampling via `perf_event` at 99 Hz:
-//! - Attach perf_event sampler to all CPUs
-//! - Capture stack traces every ~10ms (99 Hz)
-//! - Filter by target PID and Tokio worker threads
-//!
-//! **How it works**:
-//! - Kernel timer fires at 99 Hz on each CPU
-//! - eBPF captures stack trace of currently executing code
-//! - Userspace aggregates samples into flame graphs / hotspot analysis
-//! - Statistical: 1% of CPU time sampled at 99 Hz (Nyquist theorem)
-//!
-//! **Event Types**: `TRACE_EXECUTION_START` (with `detection_method=4`)
-//!
-//! **Pros**:
-//! - ✅ Very low overhead (~1% with 99 Hz sampling)
-//! - ✅ Whole-program visibility
-//! - ✅ No false positives (samples what's actually running)
-//! - ✅ Great for flame graphs
-//!
-//! **Cons**:
-//! - ❌ Statistical (may miss short-lived operations < 10ms)
-//! - ❌ Requires statistical analysis (not event-based)
-//! - ❌ Cannot measure exact durations (only frequencies)
-//!
-//! **Best for**: Understanding overall CPU usage patterns and identifying hot functions
-//!
-//! ## Detection Method Comparison
-//!
-//! | Method       | Code Changes | False Positives | Overhead | Duration Accuracy | Use Case                    |
-//! |--------------|--------------|-----------------|----------|-------------------|-----------------------------|
-//! | Marker       | Required     | None            | Very Low | Exact             | Debugging known code paths  |
-//! | Scheduler    | None         | Some            | Medium   | Threshold-based   | Production profiling        |
-//! | Sampling     | None         | None            | Very Low | Statistical       | Flame graphs / hotspots     |
-//!
-//! ## Event Types
-//!
-//! Events are emitted by eBPF programs and consumed by userspace via ring buffer.
+//! - [`TaskEvent`] - Core event structure passed via ring buffer
+//! - [`WorkerInfo`] - Tokio worker thread metadata
+//! - [`ThreadState`] - Execution state for scheduler-based detection
+//! - [`SchedSwitchArgs`] - Tracepoint arguments from `sched_switch`
 
 #![no_std]
 

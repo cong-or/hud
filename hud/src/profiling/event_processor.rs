@@ -1,169 +1,22 @@
 //! # Event Processing and State Machine
 //!
-//! This module implements the core event processing logic that consumes events
-//! from the eBPF ring buffer and routes them to appropriate handlers. It maintains
-//! a **state machine** for tracking blocking operations and execution spans.
-//!
-//! ## Architecture
-//!
-//! The `EventProcessor` acts as a central hub for event handling:
-//!
-//! ```text
-//! ┌─────────────────────────────────────────────────────────────┐
-//! │                     Main Event Loop                         │
-//! │  while ring_buf.next() { ... }                              │
-//! └──────────────────────────┬──────────────────────────────────┘
-//!                            │ TaskEvent
-//!                            ▼
-//! ┌─────────────────────────────────────────────────────────────┐
-//! │                   EventProcessor                            │
-//! │                                                             │
-//! │  ┌──────────────────────────────────────────────────────┐  │
-//! │  │  State Machine (Blocking Detection)                  │  │
-//! │  │  • blocking_state: Option<BlockingState>            │  │
-//! │  │  • Pairs START/END events                            │  │
-//! │  └──────────────────────────────────────────────────────┘  │
-//! │                            │                                │
-//! │                            ▼                                │
-//! │  ┌──────────────────────────────────────────────────────┐  │
-//! │  │  Event Routing (by event_type)                       │  │
-//! │  │  • EVENT_BLOCKING_START    → handle_blocking_start() │  │
-//! │  │  • EVENT_BLOCKING_END      → handle_blocking_end()   │  │
-//! │  │  • EVENT_SCHEDULER_DETECTED → handle_scheduler_...() │  │
-//! │  │  • TRACE_EXECUTION_*       → handle_trace_...()      │  │
-//! │  └──────────────────────────────────────────────────────┘  │
-//! │                            │                                │
-//! │          ┌─────────────────┼─────────────────┐             │
-//! │          ▼                 ▼                 ▼             │
-//! │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐   │
-//! │  │ Symbolizer   │  │   Exporter   │  │  TUI Channel │   │
-//! │  │  (DWARF)     │  │ (trace.json) │  │  (crossbeam) │   │
-//! │  └──────────────┘  └──────────────┘  └──────────────┘   │
-//! └─────────────────────────────────────────────────────────────┘
-//! ```
-//!
-//! ## State Machine: Blocking Detection
-//!
-//! The processor maintains a simple state machine for **marker-based detection**:
-//!
-//! ```text
-//! ┌─────────────┐
-//! │   Initial   │  blocking_state = None
-//! │   (Idle)    │
-//! └──────┬──────┘
-//!        │
-//!        │ EVENT_BLOCKING_START
-//!        ▼
-//! ┌─────────────┐
-//! │  Blocking   │  blocking_state = Some(BlockingState {
-//! │  In Progress│      start_time_ns: <timestamp>,
-//! └──────┬──────┘      stack_id: <stack_id>
-//!        │          })
-//!        │
-//!        │ EVENT_BLOCKING_END
-//!        ▼
-//! ┌─────────────┐
-//! │  Compute    │  duration = end_time - start_time
-//! │  Duration   │  display/export event with duration
-//! └──────┬──────┘
-//!        │
-//!        │ blocking_state = None
-//!        ▼
-//! ┌─────────────┐
-//! │   Initial   │
-//! │   (Idle)    │
-//! └─────────────┘
-//! ```
-//!
-//! **Edge Cases**:
-//! - **START without END**: State remains, next START overwrites (warn logged)
-//! - **END without START**: No state, display warning (mismatched events)
+//! Consumes events from eBPF ring buffer and routes them to appropriate handlers.
+//! Maintains state machine for pairing START/END events in marker-based detection.
 //!
 //! ## Event Routing
 //!
-//! Events are dispatched based on `event_type` field:
-//!
-//! | Event Type                | Handler                     | Detection Method |
-//! |---------------------------|-----------------------------|------------------|
-//! | `EVENT_BLOCKING_START`    | `handle_blocking_start()`   | Marker (1)       |
-//! | `EVENT_BLOCKING_END`      | `handle_blocking_end()`     | Marker (1)       |
-//! | `EVENT_SCHEDULER_DETECTED`| `handle_scheduler_detected()`| Scheduler (2)    |
-//! | `TRACE_EXECUTION_START`   | `handle_trace_execution()`  | Trace/Sample (3/4)|
-//! | `TRACE_EXECUTION_END`     | `handle_trace_execution()`  | Trace (3)        |
-//!
-//! ## Event Handlers
-//!
-//! ### 1. `handle_blocking_start()`
-//! - **Input**: `EVENT_BLOCKING_START` event
-//! - **Action**:
-//!   - Store `blocking_state` with timestamp and stack ID
-//!   - Optionally display in headless mode
-//! - **State**: `None` → `Some(BlockingState)`
-//!
-//! ### 2. `handle_blocking_end()`
-//! - **Input**: `EVENT_BLOCKING_END` event
-//! - **Action**:
-//!   - Calculate duration: `end_time - blocking_state.start_time_ns`
-//!   - Resolve stack traces for both START and END
-//!   - Display blocking operation with duration
-//!   - Increment `stats.marker_detected` counter
-//! - **State**: `Some(BlockingState)` → `None`
-//! - **Edge Case**: If `blocking_state` is `None`, warn "END without START"
-//!
-//! ### 3. `handle_scheduler_detected()`
-//! - **Input**: `EVENT_SCHEDULER_DETECTED` event (off-CPU > threshold)
-//! - **Action**:
-//!   - Resolve stack trace at detection point
-//!   - Display blocking operation with off-CPU duration
-//!   - Increment `stats.scheduler_detected` counter
-//! - **State**: Stateless (each event is independent)
-//!
-//! ### 4. `handle_trace_execution()`
-//! - **Input**: `TRACE_EXECUTION_START` or `TRACE_EXECUTION_END` events
-//! - **Action**:
-//!   - Extract top frame address for symbolization
-//!   - Convert to `TraceEvent` with function name/file/line
-//!   - Add to exporter (if enabled) for JSON export
-//!   - Send to TUI channel (if live mode) for real-time display
-//!   - Only START events sent to TUI (reduce load)
-//! - **State**: Stateless (timeline visualization, not blocking detection)
-//!
-//! ## Dependencies
-//!
-//! The `EventProcessor` is initialized with several dependencies:
-//!
-//! - **`stack_resolver`**: Resolves stack IDs to instruction pointer arrays
-//! - **`symbolizer`**: Resolves addresses to function/file/line (DWARF)
-//! - **`memory_range`**: PIE base address for address adjustment
-//! - **`trace_exporter`**: Optional JSON exporter for trace.json
-//! - **`event_tx`**: Optional crossbeam channel for sending to TUI
+//! - `EVENT_BLOCKING_START` → Store state, wait for END
+//! - `EVENT_BLOCKING_END` → Calculate duration, output result
+//! - `EVENT_SCHEDULER_DETECTED` → Off-CPU threshold exceeded
+//! - `TRACE_EXECUTION_{START,END}` → Timeline visualization
 //!
 //! ## Output Modes
 //!
-//! The processor supports multiple output modes simultaneously:
+//! - **Headless**: Print events to stdout
+//! - **Live TUI**: Send to TUI thread via channel
+//! - **Export**: Add to trace.json exporter
 //!
-//! ### 1. Headless Mode (`headless = true`)
-//! - Events printed to stdout via `display_*()` functions
-//! - Useful for CI/CD or logging to files
-//!
-//! ### 2. Live TUI Mode (`event_tx = Some(...)`)
-//! - Events sent to TUI thread via crossbeam channel
-//! - Only START events sent (END events computed in TUI)
-//! - Non-blocking send (drops events if TUI is slow)
-//!
-//! ### 3. Export Mode (`trace_exporter = Some(...)`)
-//! - All execution events added to exporter
-//! - On shutdown, writes `trace.json` in Chrome Trace Event Format
-//! - Compatible with Perfetto, Speedscope, Chrome tracing
-//!
-//! ## Statistics
-//!
-//! The processor tracks detection statistics:
-//! - **`marker_detected`**: Count of marker-based blocking detections
-//! - **`scheduler_detected`**: Count of scheduler-based detections
-//! - **`event_count`**: Total events processed
-//!
-//! These are displayed periodically in headless mode.
+//! See [Architecture docs](../../docs/ARCHITECTURE.md) for event flow details.
 
 use aya::maps::StackTraceMap;
 use crossbeam_channel::Sender;
