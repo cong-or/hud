@@ -30,6 +30,20 @@ Under the hood:
 - Scheduler events (sched_switch) — when workers go on/off CPU
 - Stack traces with DWARF symbols — file:line resolution
 
+## Requirements
+
+**System:**
+- Linux 5.15+ (eBPF support)
+- Root or CAP_BPF privileges (for eBPF attachment)
+
+**Target binary must have debug symbols:**
+```toml
+# In your application's Cargo.toml
+[profile.release]
+debug = true
+force-frame-pointers = true
+```
+
 ## Quick Start
 
 ```bash
@@ -70,20 +84,6 @@ hud --pid <PID> --target <BINARY> --export trace.json --headless --duration 60
 - **Status** - Health indicators and event counts
 
 All updating in real-time as your code runs.
-
-## Requirements
-
-**System:**
-- Linux 5.15+ (eBPF support)
-- Root or CAP_BPF privileges (for eBPF attachment)
-
-**Target binary must have debug symbols:**
-```toml
-# In your application's Cargo.toml
-[profile.release]
-debug = true
-force-frame-pointers = true
-```
 
 > **Want to contribute?** See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for build setup.
 
