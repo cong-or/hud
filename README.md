@@ -81,12 +81,11 @@ force-frame-pointers = true
 
 ## How It Works
 
-Attaches eBPF programs to capture:
-- Scheduler events (sched_switch) - when workers start/stop
-- CPU samples (perf_event @ 99Hz) - what's executing now
-- Stack traces with DWARF symbols - file:line resolution
+hud watches the Linux scheduler, sees a worker thread staying on CPU too long, and grabs a stack trace to show you what's guilty.
 
-Zero overhead, designed for Tokio.
+Under the hood:
+- Scheduler events (sched_switch) — when workers go on/off CPU
+- Stack traces with DWARF symbols — file:line resolution
 
 ## Docs
 
