@@ -13,12 +13,10 @@ sudo ./hud --pid $(pgrep my-app) --target ./my-app
 Tokio uses cooperative scheduling. Tasks yield at `.await` points, trusting that work between awaits is fast. When it isn't—CPU-heavy code, sync I/O, blocking locks—one task starves the rest.
 
 ```rust
-async fn bad() {
-    expensive_computation();  // blocks entire worker, no await = no yield
-}
-
-async fn good() {
-    tokio::task::spawn_blocking(|| expensive_computation()).await;  // offload + yield
+async fn handle(req: Request) -> Response {
+    let user = db.get_user(id).await;
+    let report = generate_pdf(&user);  // CPU-bound, blocks worker
+    Response::ok(report)
 }
 ```
 
