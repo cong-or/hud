@@ -2,11 +2,29 @@
 
 **Real-time async profiler for Tokio applications**
 
+A KISS Linux tool. One job: find what's blocking your Tokio runtime.
+
 Zero-overhead eBPF profiling with live TUI. Attach to any running process, no code changes needed.
 
 ```bash
 sudo ./hud --pid $(pgrep my-app) --target ./my-app
 ```
+
+## The Problem
+
+Tokio uses cooperative scheduling. Tasks yield at `.await` points, trusting that work between awaits is fast. When it isn't—CPU-heavy code, sync I/O, blocking locks—one task starves the rest.
+
+```rust
+async fn bad() {
+    expensive_computation();  // blocks entire worker, no await = no yield
+}
+
+async fn good() {
+    tokio::task::spawn_blocking(|| expensive_computation()).await;  // offload + yield
+}
+```
+
+These bugs are silent. No errors, no panics—just degraded throughput. hud makes them visible.
 
 ## Quick Start
 
