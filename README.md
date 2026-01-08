@@ -1,10 +1,8 @@
 # hud
 
-**Real-time async profiler for Tokio applications**
-
 A KISS Linux tool. One job: find what's blocking your Tokio runtime.
 
-Zero-overhead eBPF profiling with live TUI. Attach to any running process, no code changes needed.
+Minimal-overhead eBPF profiling. Attach to any running process, no code changes needed.
 
 ```bash
 sudo ./hud --pid $(pgrep my-app) --target ./my-app
