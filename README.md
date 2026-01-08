@@ -22,6 +22,14 @@ async fn handle(req: Request) -> Response {
 
 These bugs are silent. No errors, no panics—just degraded throughput. hud makes them visible.
 
+## How It Works
+
+hud watches the Linux scheduler, sees a worker thread staying on CPU too long, and grabs a stack trace to show you what's guilty.
+
+Under the hood:
+- Scheduler events (sched_switch) — when workers go on/off CPU
+- Stack traces with DWARF symbols — file:line resolution
+
 ## Quick Start
 
 ```bash
@@ -78,14 +86,6 @@ force-frame-pointers = true
 ```
 
 > **Want to contribute?** See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for build setup.
-
-## How It Works
-
-hud watches the Linux scheduler, sees a worker thread staying on CPU too long, and grabs a stack trace to show you what's guilty.
-
-Under the hood:
-- Scheduler events (sched_switch) — when workers go on/off CPU
-- Stack traces with DWARF symbols — file:line resolution
 
 ## Docs
 
