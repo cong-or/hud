@@ -163,7 +163,7 @@ opt-level = 2  # Instead of 3
    ```
 3. Use headless mode if TUI is problematic:
    ```bash
-   sudo -E ./hud --pid <PID> --target <BINARY> --headless
+   sudo -E ./hud --pid <PID> --target <BINARY> --headless --export trace.json
    ```
 
 ## High CPU Usage from Profiler

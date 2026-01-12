@@ -13,6 +13,9 @@ use std::path::Path;
 const MIN_KERNEL_VERSION: (u32, u32) = (5, 8);
 
 /// Run all pre-flight checks before eBPF loading
+///
+/// # Errors
+/// Returns error if any system requirement is not met (permissions, kernel version, binary).
 pub fn run_preflight_checks(target_path: &str, quiet: bool) -> Result<()> {
     check_privileges()?;
     check_kernel_version()?;
@@ -54,7 +57,7 @@ fn check_kernel_version() -> Result<()> {
     let major: u32 = version_parts[0].parse().unwrap_or(0);
     let minor: u32 = version_parts[1]
         .chars()
-        .take_while(|c| c.is_ascii_digit())
+        .take_while(char::is_ascii_digit)
         .collect::<String>()
         .parse()
         .unwrap_or(0);
@@ -80,16 +83,14 @@ fn check_binary_exists(target_path: &str) -> Result<()> {
     let path = Path::new(target_path);
     if !path.exists() {
         bail!(
-            "Binary not found: {}\n\n\
-             Make sure the path is correct and the binary exists.",
-            target_path
+            "Binary not found: {target_path}\n\n\
+             Make sure the path is correct and the binary exists."
         );
     }
     if !path.is_file() {
         bail!(
-            "Not a file: {}\n\n\
-             --target must point to an executable file, not a directory.",
-            target_path
+            "Not a file: {target_path}\n\n\
+             --target must point to an executable file, not a directory."
         );
     }
     Ok(())
@@ -104,12 +105,9 @@ fn check_debug_symbols(target_path: &str, quiet: bool) -> Result<()> {
     let file_data = std::fs::read(target_path)
         .with_context(|| format!("Failed to read binary: {target_path}"))?;
 
-    let obj = match object::File::parse(&*file_data) {
-        Ok(obj) => obj,
-        Err(_) => {
-            // Not a valid object file, let later stages handle it
-            return Ok(());
-        }
+    let Ok(obj) = object::File::parse(&*file_data) else {
+        // Not a valid object file, let later stages handle it
+        return Ok(());
     };
 
     // Check for .debug_info section (DWARF debug info)
@@ -128,6 +126,9 @@ fn check_debug_symbols(target_path: &str, quiet: bool) -> Result<()> {
 }
 
 /// Check if the target process exists
+///
+/// # Errors
+/// Returns error if the process does not exist.
 pub fn check_process_exists(pid: i32) -> Result<()> {
     let proc_path = format!("/proc/{pid}");
     if !Path::new(&proc_path).exists() {
@@ -140,6 +141,9 @@ pub fn check_process_exists(pid: i32) -> Result<()> {
 }
 
 /// Check if we can read the process's memory maps
+///
+/// # Errors
+/// Returns error if `/proc/<pid>/maps` cannot be read.
 pub fn check_proc_access(pid: i32) -> Result<()> {
     let maps_path = format!("/proc/{pid}/maps");
     std::fs::read_to_string(&maps_path).with_context(|| {

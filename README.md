@@ -33,7 +33,7 @@ Under the hood:
 ## Requirements
 
 **System:**
-- Linux 5.15+ (eBPF support)
+- Linux 5.8+ (eBPF ring buffer support)
 - Root or CAP_BPF privileges (for eBPF attachment)
 
 **Target binary must have debug symbols:**
