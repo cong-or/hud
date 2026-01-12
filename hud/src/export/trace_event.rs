@@ -123,16 +123,9 @@ impl TraceEventExporter {
     }
 
     /// Add a task event to the trace
-    ///
-    /// # Panics
-    /// Panics if `start_timestamp_ns` is None (this should never happen as it's initialized on first event)
     pub fn add_event(&mut self, event: &TaskEvent, top_frame_addr: Option<u64>) {
-        // Initialize start timestamp on first event
-        if self.start_timestamp_ns.is_none() {
-            self.start_timestamp_ns = Some(event.timestamp_ns);
-        }
-
-        let start_ts = self.start_timestamp_ns.unwrap();
+        // Initialize start timestamp on first event, or get existing
+        let start_ts = *self.start_timestamp_ns.get_or_insert(event.timestamp_ns);
 
         // Convert timestamp from nanoseconds to microseconds (relative to start)
         let ts_us = if event.timestamp_ns >= start_ts {

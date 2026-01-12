@@ -29,6 +29,7 @@ use std::time::{Duration, Instant};
 
 // Import modules
 use hud::cli::Args;
+use hud::preflight::{check_proc_access, check_process_exists, run_preflight_checks};
 use hud::profiling::{
     attach_task_id_uprobe, display_statistics, init_ebpf_logger, load_ebpf_program,
     print_perf_event_diagnostics, setup_scheduler_detection, EventProcessor, StackResolver,
@@ -72,6 +73,11 @@ async fn main() -> Result<()> {
         .to_string_lossy()
         .to_string();
 
+    // Run pre-flight checks before anything else
+    run_preflight_checks(&target_path)?;
+    check_process_exists(pid)?;
+    check_proc_access(pid)?;
+
     println!("📦 Target: {target_path}");
     println!("📊 PID: {pid}");
 
@@ -112,13 +118,17 @@ async fn main() -> Result<()> {
     let stack_resolver = StackResolver::new(&symbolizer, memory_range);
 
     // Initialize trace event exporter if export requested
-    let trace_exporter = args.export.as_ref().map(|_| {
-        let mut exporter = TraceEventExporter::new(Symbolizer::new(&target_path).unwrap());
-        if let Some(range) = memory_range {
-            exporter.set_memory_range(range);
-        }
-        exporter
-    });
+    let trace_exporter = args.export.as_ref()
+        .map(|_| -> Result<_> {
+            let export_symbolizer = Symbolizer::new(&target_path)
+                .context("Failed to create symbolizer for trace export")?;
+            let mut exporter = TraceEventExporter::new(export_symbolizer);
+            if let Some(range) = memory_range {
+                exporter.set_memory_range(range);
+            }
+            Ok(exporter)
+        })
+        .transpose()?;
 
     if let Some(ref export_path) = args.export {
         println!("💾 Export: {}", export_path.display());
