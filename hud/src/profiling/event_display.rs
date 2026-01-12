@@ -37,11 +37,8 @@ pub fn display_scheduler_detected<T: Borrow<MapData>>(
 /// Display an execution event (trace start/end) in live mode
 pub fn display_execution_event(event: &TaskEvent, is_start: bool) {
     let event_name = if is_start { "EXEC_START" } else { "EXEC_END" };
-    let worker = if event.worker_id == u32::MAX {
-        "N/A".to_string()
-    } else {
-        event.worker_id.to_string()
-    };
+    let worker =
+        if event.worker_id == u32::MAX { "N/A".to_string() } else { event.worker_id.to_string() };
 
     println!("[{event_name}] pid={} tid={} worker={worker}", event.pid, event.tid);
 }

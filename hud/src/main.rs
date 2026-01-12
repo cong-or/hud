@@ -68,7 +68,6 @@ fn exit_code_for(err: &anyhow::Error) -> i32 {
 
 #[tokio::main]
 async fn run() -> Result<()> {
-
     let args = Args::parse();
 
     let quiet = args.quiet;
@@ -168,7 +167,6 @@ async fn run() -> Result<()> {
     let (tui_handle, event_tx) = if args.headless {
         (None, None)
     } else {
-
         let (event_tx, event_rx) = bounded(1000);
 
         // Spawn TUI thread
