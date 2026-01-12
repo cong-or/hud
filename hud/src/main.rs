@@ -118,7 +118,9 @@ async fn main() -> Result<()> {
     let stack_resolver = StackResolver::new(&symbolizer, memory_range);
 
     // Initialize trace event exporter if export requested
-    let trace_exporter = args.export.as_ref()
+    let trace_exporter = args
+        .export
+        .as_ref()
         .map(|_| -> Result<_> {
             let export_symbolizer = Symbolizer::new(&target_path)
                 .context("Failed to create symbolizer for trace export")?;
