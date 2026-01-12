@@ -16,44 +16,34 @@ pub fn display_scheduler_detected<T: Borrow<MapData>>(
 ) {
     let duration_ms = event.duration_ns as f64 / 1_000_000.0;
 
-    println!("\n🟢 SCHEDULER DETECTED");
-    println!(
-        "   Duration: {:.2}ms (off-CPU) {}",
-        duration_ms,
-        if duration_ms > 10.0 { "⚠️" } else { "" }
-    );
-    println!("   Process: PID {}", event.pid);
-    println!("   Thread: TID {}", event.tid);
+    println!("\n[BLOCK] {:.2}ms pid={} tid={}", duration_ms, event.pid, event.tid);
     if event.task_id != 0 {
-        println!("   Task ID: {}", event.task_id);
+        println!("  task_id={}", event.task_id);
     }
 
     // Decode thread state
     let state_str = match event.thread_state {
-        0 => "TASK_RUNNING (CPU blocking)",
-        1 => "TASK_INTERRUPTIBLE (I/O wait)",
-        2 => "TASK_UNINTERRUPTIBLE",
+        0 => "RUNNING",
+        1 => "INTERRUPTIBLE",
+        2 => "UNINTERRUPTIBLE",
         _ => "UNKNOWN",
     };
-    println!("   State: {state_str}");
+    println!("  state={state_str}");
 
     // Print stack trace
     let _ = stack_resolver.resolve_and_print(StackId(event.stack_id), stack_traces);
-
-    println!();
 }
 
 /// Display an execution event (trace start/end) in live mode
 pub fn display_execution_event(event: &TaskEvent, is_start: bool) {
     let event_name = if is_start { "EXEC_START" } else { "EXEC_END" };
+    let worker = if event.worker_id == u32::MAX {
+        "N/A".to_string()
+    } else {
+        event.worker_id.to_string()
+    };
 
-    println!(
-        "🟣 {} [PID {} TID {} Worker {}]",
-        event_name,
-        event.pid,
-        event.tid,
-        if event.worker_id == u32::MAX { "N/A".to_string() } else { event.worker_id.to_string() }
-    );
+    println!("[{event_name}] pid={} tid={} worker={worker}", event.pid, event.tid);
 }
 
 /// Statistics for detection methods
@@ -64,9 +54,7 @@ pub struct DetectionStats {
 
 /// Display detection statistics
 pub fn display_statistics(stats: &DetectionStats) {
-    println!("\n📊 Detection Statistics (last 10s):");
-    println!("   Scheduler: {}", stats.scheduler_detected);
-    println!();
+    eprintln!("stats: scheduler_detected={}", stats.scheduler_detected);
 }
 
 /// Display progress for trace collection

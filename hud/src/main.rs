@@ -37,34 +37,56 @@ use hud::profiling::{
 use hud::trace_data::TraceData;
 use hud::tui::{self, App};
 
-#[tokio::main]
-async fn main() -> Result<()> {
+// Exit codes
+const EXIT_SUCCESS: i32 = 0;
+const EXIT_ERROR: i32 = 1;
+const EXIT_USAGE: i32 = 2;
+const EXIT_NOPERM: i32 = 77;
+
+fn main() {
     env_logger::init();
+    std::process::exit(match run() {
+        Ok(()) => EXIT_SUCCESS,
+        Err(e) => {
+            let code = exit_code_for(&e);
+            eprintln!("error: {e}");
+            code
+        }
+    });
+}
+
+fn exit_code_for(err: &anyhow::Error) -> i32 {
+    let msg = err.to_string().to_lowercase();
+    if msg.contains("permission denied") || msg.contains("requires root") {
+        EXIT_NOPERM
+    } else if msg.contains("missing required argument") {
+        EXIT_USAGE
+    } else {
+        EXIT_ERROR
+    }
+}
+
+#[tokio::main]
+async fn run() -> Result<()> {
 
     let args = Args::parse();
 
+    let quiet = args.quiet;
+
     // Mode 1: Replay mode - load trace file and display in TUI
     if let Some(trace_path) = args.replay {
-        println!("🎨 Launching replay mode: {}", trace_path.display());
         let data = TraceData::from_file(&trace_path)?;
         let app = App::new(data);
         return app.run();
     }
 
     // Mode 2 & 3: Live profiling (with or without TUI)
-    // Requires --pid argument
-    let pid = args.pid.ok_or_else(|| anyhow::anyhow!(
-        "Missing required argument: --pid\n\nUsage:\n  hud --pid <PID> --target <BINARY>          # Live TUI profiling\n  hud --pid <PID> --target <BINARY> --export <FILE>  # Also save to file\n  hud --replay <FILE>                         # Replay saved trace"
-    ))?;
+    let pid = args.pid.ok_or_else(|| {
+        anyhow::anyhow!("Missing required argument: --pid\n\nRun 'hud --help' for usage")
+    })?;
 
-    println!("🔍 hud v0.1.0");
-    println!("   F-35 inspired profiler for async Rust\n");
-
-    // Determine target binary and make it absolute
     let target_path = args.target.ok_or_else(|| {
-        anyhow::anyhow!(
-            "Missing required argument: --target\n\nSpecify the binary path for symbol resolution"
-        )
+        anyhow::anyhow!("Missing required argument: --target\n\nRun 'hud --help' for usage")
     })?;
 
     // Convert to absolute path
@@ -74,12 +96,15 @@ async fn main() -> Result<()> {
         .to_string();
 
     // Run pre-flight checks before anything else
-    run_preflight_checks(&target_path)?;
+    run_preflight_checks(&target_path, quiet)?;
     check_process_exists(pid)?;
     check_proc_access(pid)?;
 
-    println!("📦 Target: {target_path}");
-    println!("📊 PID: {pid}");
+    if !quiet {
+        println!("hud v0.1.0");
+        println!("target: {target_path}");
+        println!("pid: {pid}");
+    }
 
     // Load the eBPF program
     let mut bpf = load_ebpf_program()?;
@@ -91,13 +116,14 @@ async fn main() -> Result<()> {
     let task_id_attached = attach_task_id_uprobe(&mut bpf, &target_path, Some(pid))?;
 
     if !task_id_attached {
-        println!("⚠️  Note: Task IDs unavailable (set_current_task_id inlined in release build)");
+        eprintln!("warning: task IDs unavailable (symbol inlined in release build)");
     }
 
     // Setup scheduler-based detection
     let worker_count = setup_scheduler_detection(&mut bpf, pid)?;
-    println!("   Workers: {worker_count}");
-    println!("   Detection: sched_switch (5ms threshold) + perf_event (99Hz)");
+    if !quiet {
+        println!("workers: {worker_count}");
+    }
 
     // Get memory range for PIE address resolution
     let memory_range = match parse_memory_maps(pid, &target_path) {
@@ -132,16 +158,16 @@ async fn main() -> Result<()> {
         })
         .transpose()?;
 
-    if let Some(ref export_path) = args.export {
-        println!("💾 Export: {}", export_path.display());
+    if !quiet {
+        if let Some(ref export_path) = args.export {
+            println!("export: {}", export_path.display());
+        }
     }
 
     // Launch TUI in separate thread if not headless
     let (tui_handle, event_tx) = if args.headless {
-        println!("\n📊 Headless mode - collecting data...\n");
         (None, None)
     } else {
-        println!("\n🎯 Launching live HUD...\n");
 
         let (event_tx, event_rx) = bounded(1000);
 
@@ -188,8 +214,9 @@ async fn main() -> Result<()> {
         // Check for duration timeout
         if let Some(limit) = duration_limit {
             if profiling_start.elapsed() >= limit {
-                println!("\n\n✓ Duration limit reached ({}s), shutting down", args.duration);
-                println!("  Processed {} events", processor.event_count);
+                if !quiet {
+                    eprintln!("duration limit reached ({}s)", args.duration);
+                }
                 break;
             }
         }
@@ -229,8 +256,6 @@ async fn main() -> Result<()> {
                 // Continue loop
             }
             _ = &mut ctrl_c => {
-                println!("\n\n✓ Received Ctrl+C, shutting down gracefully");
-                println!("  Processed {} events", processor.event_count);
                 break;
             }
         }
@@ -248,16 +273,14 @@ async fn main() -> Result<()> {
     // Export trace if enabled
     if let Some(exporter) = processor.take_exporter() {
         let export_path = args.export.unwrap(); // Safe because we checked earlier
-        println!("\n📝 Exporting trace...");
-        println!("   Events: {}", exporter.event_count());
 
         let file = File::create(&export_path).context("Failed to create trace output file")?;
         let writer = BufWriter::new(file);
         exporter.export(writer).context("Failed to export trace")?;
 
-        println!("   ✓ Saved to: {}", export_path.display());
-        println!("\n💡 To replay:");
-        println!("   hud --replay {}", export_path.display());
+        if !quiet {
+            println!("saved: {}", export_path.display());
+        }
     }
 
     Ok(())

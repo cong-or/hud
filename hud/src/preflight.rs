@@ -13,11 +13,11 @@ use std::path::Path;
 const MIN_KERNEL_VERSION: (u32, u32) = (5, 8);
 
 /// Run all pre-flight checks before eBPF loading
-pub fn run_preflight_checks(target_path: &str) -> Result<()> {
+pub fn run_preflight_checks(target_path: &str, quiet: bool) -> Result<()> {
     check_privileges()?;
     check_kernel_version()?;
     check_binary_exists(target_path)?;
-    check_debug_symbols(target_path)?;
+    check_debug_symbols(target_path, quiet)?;
     Ok(())
 }
 
@@ -96,7 +96,11 @@ fn check_binary_exists(target_path: &str) -> Result<()> {
 }
 
 /// Check if the binary has debug symbols for proper stack trace resolution
-fn check_debug_symbols(target_path: &str) -> Result<()> {
+fn check_debug_symbols(target_path: &str, quiet: bool) -> Result<()> {
+    if quiet {
+        return Ok(());
+    }
+
     let file_data = std::fs::read(target_path)
         .with_context(|| format!("Failed to read binary: {target_path}"))?;
 
@@ -109,29 +113,15 @@ fn check_debug_symbols(target_path: &str) -> Result<()> {
     };
 
     // Check for .debug_info section (DWARF debug info)
-    let has_debug_info = obj.section_by_name(".debug_info").map(|s| s.size() > 0).unwrap_or(false);
+    let has_debug_info = obj.section_by_name(".debug_info").is_some_and(|s| s.size() > 0);
 
     // Check for .symtab (symbol table - present in non-stripped binaries)
-    let has_symtab = obj.section_by_name(".symtab").map(|s| s.size() > 0).unwrap_or(false);
+    let has_symtab = obj.section_by_name(".symtab").is_some_and(|s| s.size() > 0);
 
     if !has_debug_info && !has_symtab {
-        eprintln!(
-            "Warning: Binary appears to be stripped (no debug symbols)\n\
-             Stack traces will show raw addresses instead of function names.\n\n\
-             To get useful stack traces, rebuild with debug symbols:\n\
-             \n\
-             In Cargo.toml:\n\
-             [profile.release]\n\
-             debug = true\n"
-        );
+        eprintln!("warning: binary stripped, stack traces will show addresses only");
     } else if !has_debug_info {
-        eprintln!(
-            "Warning: Binary has symbol table but no DWARF debug info.\n\
-             Function names will be available, but no file:line information.\n\n\
-             For full stack traces with source locations, add to Cargo.toml:\n\
-             [profile.release]\n\
-             debug = true\n"
-        );
+        eprintln!("warning: no DWARF debug info, source locations unavailable");
     }
 
     Ok(())
