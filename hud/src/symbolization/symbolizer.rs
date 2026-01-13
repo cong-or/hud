@@ -18,8 +18,8 @@ use std::rc::Rc;
 /// which significantly improves performance when symbolizing stack traces.
 pub struct Symbolizer {
     ctx: Context<EndianRcSlice<RunTimeEndian>>,
-    /// Cache of resolved frames by address
-    cache: RefCell<HashMap<u64, ResolvedFrame>>,
+    /// Cache of resolved frames by address (Rc avoids cloning on cache hits)
+    cache: RefCell<HashMap<u64, Rc<ResolvedFrame>>>,
 }
 
 impl Symbolizer {
@@ -54,10 +54,11 @@ impl Symbolizer {
     /// Resolve an instruction pointer to source location information
     ///
     /// Uses a cache to avoid re-resolving the same address multiple times.
-    pub fn resolve(&self, addr: u64) -> ResolvedFrame {
+    /// Returns `Rc<ResolvedFrame>` to avoid cloning on cache hits.
+    pub fn resolve(&self, addr: u64) -> Rc<ResolvedFrame> {
         // Check cache first
         if let Some(cached) = self.cache.borrow().get(&addr) {
-            return cached.clone();
+            return Rc::clone(cached);
         }
 
         // Cache miss - perform actual resolution
@@ -80,17 +81,17 @@ impl Symbolizer {
             }
         }
 
-        let resolved = ResolvedFrame {
+        let resolved = Rc::new(ResolvedFrame {
             addr,
             frames: if result.is_empty() {
                 vec![InlinedFrame { function: "<unknown>".to_string(), location: None }]
             } else {
                 result
             },
-        };
+        });
 
         // Store in cache
-        self.cache.borrow_mut().insert(addr, resolved.clone());
+        self.cache.borrow_mut().insert(addr, Rc::clone(&resolved));
 
         resolved
     }

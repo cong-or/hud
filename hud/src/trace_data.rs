@@ -68,10 +68,9 @@ impl LiveData {
 
         // Track workers (update when new worker appears)
         if self.workers_set.insert(event.worker_id) {
-            let mut workers_vec = Arc::make_mut(&mut self.workers).clone();
+            let workers_vec = Arc::make_mut(&mut self.workers);
             workers_vec.push(event.worker_id);
             workers_vec.sort_unstable();
-            self.workers = Arc::new(workers_vec);
         }
 
         // Update duration
@@ -131,13 +130,10 @@ impl TraceData {
             })
             .collect();
 
-        // Extract unique workers and max timestamp
-        let mut workers: Vec<u32> = events
-            .iter()
-            .map(|e| e.worker_id)
-            .collect::<std::collections::HashSet<_>>()
-            .into_iter()
-            .collect();
+        // Extract unique workers in single pass
+        let mut seen = HashSet::new();
+        let mut workers: Vec<u32> =
+            events.iter().filter_map(|e| seen.insert(e.worker_id).then_some(e.worker_id)).collect();
         workers.sort_unstable();
 
         let max_timestamp = events.iter().map(|e| e.timestamp).fold(0.0f64, f64::max);
