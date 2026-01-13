@@ -84,18 +84,13 @@ impl TraceEventExporter {
         }
 
         // Determine if address is in main executable and adjust accordingly
-        let (file_offset, in_executable) = if let Some(range) = self.memory_range {
+        let (file_offset, in_executable) = self.memory_range.map_or((addr, true), |range| {
             if range.contains(addr) {
-                // Address is in main executable, adjust to file offset
                 (addr - range.start, true)
             } else {
-                // Address is outside executable (shared library)
                 (addr, false)
             }
-        } else {
-            // No range info, use address as-is
-            (addr, true)
-        };
+        });
 
         let (function_name, file, line) = if in_executable {
             // Resolve the symbol
