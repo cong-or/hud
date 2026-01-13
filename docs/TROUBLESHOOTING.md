@@ -89,16 +89,16 @@ cargo install bpf-linker --features llvm-21
 
 **Error:** `undefined symbol: LLVMGetStackMapSlotCount`
 
-**Solution:** Ensure LLVM 20-22 is installed and bpf-linker uses matching version:
+**Solution:** Ensure LLVM is installed and bpf-linker uses a compatible version:
 ```bash
 # Fedora/RHEL
 sudo dnf install llvm-devel clang
 
-# Ubuntu/Debian
-sudo apt install llvm-21-dev libclang-21-dev
+# Ubuntu/Debian (adjust version as needed)
+sudo apt install llvm-dev libclang-dev
 
 # Reinstall bpf-linker
-cargo install bpf-linker --features llvm-21 --force
+cargo install bpf-linker --force
 ```
 
 ### Rust Nightly Issues
@@ -215,7 +215,7 @@ opt-level = 2  # Instead of 3
 uname -r
 ```
 
-**Solution:** Upgrade to Linux 5.15 or newer. eBPF features required:
+**Solution:** Upgrade to Linux 5.8 or newer. eBPF features required:
 - BTF (BPF Type Format)
 - Ring buffers
 - Stack trace support

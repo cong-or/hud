@@ -1,5 +1,9 @@
 # hud
 
+[![CI](https://github.com/USER/hud/workflows/CI/badge.svg)](https://github.com/USER/hud/actions)
+[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue)](LICENSE)
+[![Linux 5.8+](https://img.shields.io/badge/Linux-5.8%2B-yellow?logo=linux)](docs/ARCHITECTURE.md)
+
 A KISS Linux tool. One job: find what's blocking your Tokio runtime.
 
 Minimal-overhead eBPF profiling. Attach to any running process, no code changes needed.

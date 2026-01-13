@@ -33,7 +33,7 @@ hud/
 ## Prerequisites
 
 **System Requirements:**
-- Linux 5.15+ (eBPF support)
+- Linux 5.8+ (eBPF ring buffer support)
 - x86_64 or aarch64 architecture
 - Root/CAP_BPF privileges for running
 
@@ -51,11 +51,11 @@ rustup toolchain install nightly --component rust-src
 # Fedora/RHEL
 sudo dnf install llvm-devel clang libffi-devel
 
-# Ubuntu/Debian
-sudo apt install llvm-21-dev libclang-21-dev
+# Ubuntu/Debian (adjust version to match your LLVM)
+sudo apt install llvm-dev libclang-dev
 
-# BPF linker
-cargo install bpf-linker --features llvm-21
+# BPF linker (use matching LLVM version, e.g., llvm-18, llvm-19, llvm-21)
+cargo install bpf-linker
 ```
 
 ## Building
@@ -343,7 +343,7 @@ diff before.txt after.txt
 **eBPF build fails:**
 - Ensure nightly toolchain with rust-src
 - Verify bpf-linker installed
-- Check LLVM version (20-22)
+- Check LLVM version compatibility
 
 **Tests fail:**
 - Run `cargo clean`

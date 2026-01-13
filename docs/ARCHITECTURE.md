@@ -4,7 +4,7 @@ How hud works under the hood.
 
 ## Overview
 
-hud uses eBPF (extended Berkeley Packet Filter) to instrument Tokio applications at the kernel level with zero overhead. It captures scheduler events, CPU samples, and stack traces without modifying application code.
+hud uses eBPF (extended Berkeley Packet Filter) to instrument Tokio applications at the kernel level with minimal overhead. It captures scheduler events, CPU samples, and stack traces without modifying application code.
 
 ```
 ┌─────────────────────────────────────────┐
@@ -230,7 +230,7 @@ eBPF programs require special compilation:
 
 ## Limitations
 
-- **Linux only:** eBPF is Linux-specific (5.15+)
+- **Linux only:** eBPF is Linux-specific (5.8+)
 - **Tokio only:** Worker discovery assumes Tokio thread naming
 - **Debug symbols required:** Need DWARF for function names
 - **Root required:** eBPF needs elevated privileges
