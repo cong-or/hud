@@ -1,6 +1,6 @@
 # hud
 
-[![CI](https://github.com/USER/hud/workflows/CI/badge.svg)](https://github.com/USER/hud/actions)
+[![CI](https://github.com/cong-or/runtime-scope/actions/workflows/ci.yml/badge.svg)](https://github.com/cong-or/runtime-scope/actions)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue)](LICENSE)
 [![Linux 5.8+](https://img.shields.io/badge/Linux-5.8%2B-yellow?logo=linux)](docs/ARCHITECTURE.md)
 
