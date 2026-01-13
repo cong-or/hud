@@ -15,7 +15,6 @@ hud-common = { path = "../hud-common", features = ["user"] }
 clap = { version = "4.5", features = ["derive"] }
 env_logger = "0.11"
 log = "0.4"
-futures = "0.3"
 # Symbol resolution for stack traces
 addr2line = "0.24"
 object = { version = "0.36", default-features = false, features = ["read_core", "elf"] }

@@ -20,11 +20,7 @@ These bugs are silent. No errors, no panics—just degraded throughput. hud make
 
 ## How It Works
 
-hud watches the Linux scheduler, sees a worker thread staying on CPU too long, and grabs a stack trace to show you what's guilty.
-
-Under the hood:
-- Scheduler events (sched_switch) — when workers go on/off CPU
-- Stack traces with DWARF symbols — file:line resolution
+Watches the Linux scheduler via eBPF. When a worker thread stays on CPU too long, grabs a stack trace to show you what's blocking.
 
 ## Requirements
 
@@ -79,14 +75,9 @@ hud --pid <PID> --target <BINARY> --export trace.json --headless --duration 60
 
 ## What You See
 
-- **Hotspots** - Functions sorted by total CPU time with file:line
-- **Workers** - Per-thread utilization and blocking events
-- **Timeline** - Execution flow as it happens
-- **Status** - Health indicators and event counts
+Real-time TUI showing hotspots (functions by CPU time), worker utilization, and stack traces with file:line resolution.
 
-All updating in real-time as your code runs.
-
-> **Want to contribute?** See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for build setup.
+> **Want to contribute?** See [DEVELOPMENT.md](docs/DEVELOPMENT.md)
 
 ## Docs
 
