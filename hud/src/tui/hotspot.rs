@@ -7,7 +7,7 @@ use ratatui::{
 };
 use std::collections::HashMap;
 
-use super::{severity_marker, CAUTION_AMBER, INFO_DIM};
+use super::theme::{severity_marker, CAUTION_AMBER, HUD_GREEN, INFO_DIM, SEL_CURSOR};
 use crate::analysis::{analyze_hotspots, FunctionHotspot};
 use crate::trace_data::TraceData;
 
@@ -29,32 +29,31 @@ fn rebuild_hotspots_for_workers(data: &TraceData, worker_ids: &[u32]) -> Vec<Fun
 
     let worker_set: HashSet<u32> = worker_ids.iter().copied().collect();
 
-    // Rebuild hotspots from filtered events using functional fold
-    let function_data = data
+    // Single pass: aggregate function data and count samples
+    // Filter out "execution" events (scheduler/idle time)
+    let (function_data, total_samples) = data
         .events
         .iter()
-        .filter(|event| worker_set.contains(&event.worker_id))
-        .fold(HashMap::new(), |mut acc, event| {
+        .filter(|event| worker_set.contains(&event.worker_id) && event.name != "execution")
+        .fold((HashMap::new(), 0usize), |(mut acc, count), event| {
             let entry = acc
                 .entry(event.name.clone())
                 .or_insert_with(|| (HashMap::new(), event.file.clone(), event.line));
             *entry.0.entry(event.worker_id).or_insert(0) += 1;
-            acc
+            (acc, count + 1)
         });
-
-    // Convert to vector and calculate percentages
-    let total_samples = data.events.iter().filter(|e| worker_set.contains(&e.worker_id)).count();
     let mut hotspots: Vec<FunctionHotspot> = function_data
         .into_iter()
         .map(|(name, (workers, file, line))| {
             let count: usize = workers.values().sum();
-            let percentage = (count as f64 / total_samples as f64) * 100.0;
+            let percentage =
+                if total_samples > 0 { (count as f64 / total_samples as f64) * 100.0 } else { 0.0 };
             FunctionHotspot { name, count, percentage, workers, file, line }
         })
         .collect();
 
-    // Sort by count (descending)
-    hotspots.sort_by(|a, b| b.count.cmp(&a.count));
+    // Sort by count (descending) - unstable sort is faster
+    hotspots.sort_unstable_by_key(|h| std::cmp::Reverse(h.count));
 
     hotspots
 }
@@ -147,12 +146,10 @@ impl HotspotView {
     pub fn render(&self, f: &mut Frame, area: Rect, _data: &TraceData) {
         let mut lines = vec![];
 
-        lines.push(Line::from(""));
-
-        // Calculate visible area (accounting for borders and header)
-        let available_height = area.height.saturating_sub(3) as usize;
-        let lines_per_item = 5; // Approximate lines per hotspot entry
-        let display_count = (available_height / lines_per_item).min(self.hotspots.len());
+        // Calculate visible items (2 lines per item now: name+pct, location)
+        let available_height = area.height.saturating_sub(2) as usize;
+        let lines_per_item = 2;
+        let display_count = (available_height / lines_per_item).max(1).min(self.hotspots.len());
 
         // Ensure selected item is visible
         let mut scroll_offset = self.scroll_offset;
@@ -160,105 +157,76 @@ impl HotspotView {
             scroll_offset = self.selected_index.saturating_sub(display_count - 1);
         }
 
-        // Show top functions (compact for glass cockpit)
+        // Compact tactical display
         for (display_idx, hotspot) in
             self.hotspots.iter().skip(scroll_offset).take(display_count).enumerate()
         {
             let absolute_idx = scroll_offset + display_idx;
             let is_selected = absolute_idx == self.selected_index;
 
-            // Color based on severity
             let (marker, severity_color) = severity_marker(hotspot.percentage);
 
-            // Function name (with special handling for system events)
-            let max_name_len = 40;
-            let (display_name, info_message) = if hotspot.name == "execution" {
-                // Generic name when stack capture failed (e.g., from sched_switch)
-                ("⚙️  [scheduler event]".to_string(), Some("Stack trace unavailable"))
-            } else if hotspot.name.starts_with("<shared:") {
-                // Unresolved shared library address
-                ("🔗 [shared library]".to_string(), Some("No debug symbols"))
-            } else if (hotspot.name.starts_with("std::")
-                || hotspot.name.starts_with("core::")
-                || hotspot.name.starts_with("alloc::"))
-                && hotspot.file.is_none()
-            {
-                // Resolved standard library function without source location
-                let short_name = if hotspot.name.len() > max_name_len {
-                    format!("{}...", &hotspot.name[..max_name_len - 3])
-                } else {
-                    hotspot.name.clone()
-                };
-                (format!("📚 {short_name}"), Some("Rust standard library"))
+            // Truncate function name for display
+            let max_name_len = (area.width as usize).saturating_sub(20).min(50);
+            let display_name = if hotspot.name.len() > max_name_len {
+                format!("{}...", &hotspot.name[..max_name_len.saturating_sub(3)])
             } else {
-                // Normal user code function
-                let name = if hotspot.name.len() > max_name_len {
-                    format!("{}...", &hotspot.name[..max_name_len - 3])
-                } else {
-                    hotspot.name.clone()
-                };
-                (name, None)
+                hotspot.name.clone()
             };
 
-            // Add selection indicator and highlight
-            let selection_indicator = if is_selected { "▶ " } else { "  " };
+            // Selection cursor
+            let cursor = if is_selected { SEL_CURSOR } else { "   " };
             let name_style = if is_selected {
                 Style::default()
                     .fg(severity_color)
                     .add_modifier(Modifier::BOLD | Modifier::REVERSED)
             } else {
-                Style::default().fg(severity_color).add_modifier(Modifier::BOLD)
+                Style::default().fg(severity_color)
             };
 
+            // Line 1: cursor + marker + name + percentage
             lines.push(Line::from(vec![
-                Span::styled(selection_indicator, Style::default().fg(CAUTION_AMBER)),
-                Span::styled(format!("{marker}  "), Style::default()),
+                Span::styled(cursor, Style::default().fg(CAUTION_AMBER)),
+                Span::raw(" "),
+                Span::styled(marker, Style::default().fg(severity_color)),
+                Span::raw(" "),
                 Span::styled(display_name, name_style),
-            ]));
-
-            // Sample percentage
-            lines.push(Line::from(vec![
-                Span::raw("       "),
                 Span::styled(
-                    format!("{:.1}% CPU", hotspot.percentage),
+                    format!(" {:>5.1}%", hotspot.percentage),
                     Style::default().fg(severity_color),
                 ),
             ]));
 
-            // Info message for special cases
-            if let Some(msg) = info_message {
-                lines.push(Line::from(vec![
-                    Span::raw("     "),
-                    Span::styled("ℹ️  ", Style::default().fg(INFO_DIM)),
-                    Span::styled(msg, Style::default().fg(INFO_DIM)),
-                ]));
-            }
-
-            // File:line if available
-            if let Some(ref file) = hotspot.file {
-                if let Some(line) = hotspot.line {
-                    // Extract just filename from path
+            // Line 2: location (if available) or sample count
+            let location = hotspot.file.as_ref().and_then(|file| {
+                hotspot.line.map(|line| {
                     let filename = std::path::Path::new(file)
                         .file_name()
                         .and_then(|n| n.to_str())
                         .unwrap_or(file);
-                    lines.push(Line::from(vec![
-                        Span::raw("     "),
-                        Span::styled("📍 ", Style::default().fg(INFO_DIM)),
-                        Span::styled(format!("{filename}:{line}"), Style::default().fg(INFO_DIM)),
-                    ]));
-                }
-            }
+                    format!("{filename}:{line}")
+                })
+            });
+
+            let detail = location.unwrap_or_else(|| format!("{} samples", hotspot.count));
+            lines.push(Line::from(vec![
+                Span::raw("        "),
+                Span::styled(detail, Style::default().fg(INFO_DIM)),
+            ]));
         }
 
         let title = if self.filter_active {
-            format!("TOP ISSUES (FILTERED: {} / {})", self.hotspots.len(), self.all_hotspots.len())
+            format!("Hotspots [{}/{}]", self.hotspots.len(), self.all_hotspots.len())
         } else {
-            "TOP ISSUES".to_string()
+            "Hotspots".to_string()
         };
 
-        let paragraph =
-            Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(title));
+        let paragraph = Paragraph::new(lines).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(title)
+                .border_style(Style::default().fg(HUD_GREEN)),
+        );
 
         f.render_widget(paragraph, area);
     }

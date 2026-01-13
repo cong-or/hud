@@ -60,7 +60,7 @@ mod workers;
 
 use hotspot::HotspotView;
 use status::StatusPanel;
-use theme::{severity_marker, BACKGROUND, CAUTION_AMBER, CRITICAL_RED, HUD_GREEN, INFO_DIM};
+use theme::{BACKGROUND, CAUTION_AMBER, CRITICAL_RED, HUD_GREEN, INFO_DIM};
 use timeline::TimelineView;
 use workers::WorkersPanel;
 
@@ -555,22 +555,30 @@ impl App {
                     ])
                     .split(f.area());
 
-                // Header
+                // Header - tactical display
                 let header = Paragraph::new(vec![Line::from(vec![
                     Span::styled(
-                        "hud",
+                        "HUD",
                         Style::default().fg(HUD_GREEN).add_modifier(Modifier::BOLD),
                     ),
-                    Span::styled(" v0.1.0", Style::default().fg(INFO_DIM)),
-                    Span::raw("    PID: "),
-                    Span::styled("trace.json", Style::default().fg(INFO_DIM)),
-                    Span::raw("    Duration: "),
+                    Span::styled(" | ", Style::default().fg(INFO_DIM)),
+                    Span::styled("REPLAY", Style::default().fg(CAUTION_AMBER)),
+                    Span::styled(" | ", Style::default().fg(INFO_DIM)),
                     Span::styled(
                         format!("{:.1}s", self.data.duration),
                         Style::default().fg(HUD_GREEN),
                     ),
+                    Span::styled(" | ", Style::default().fg(INFO_DIM)),
+                    Span::styled(
+                        format!("{} evts", self.data.events.len()),
+                        Style::default().fg(HUD_GREEN),
+                    ),
                 ])])
-                .block(Block::default().borders(Borders::ALL));
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(HUD_GREEN)),
+                );
                 f.render_widget(header, outer_layout[0]);
 
                 // Main content area - show different views based on mode
@@ -616,18 +624,12 @@ impl App {
                         self.workers_panel.render(f, bottom_cols[0], &self.data);
                         self.timeline_view.render(f, bottom_cols[1], &self.data);
 
-                        // If in search mode, overlay search input box
-                        if matches!(self.view_mode, ViewMode::Search) {
+                        // Overlay based on mode
+                        if self.view_mode == ViewMode::Search {
                             self.render_search_input(f, main_area);
-                        }
-
-                        // If in worker filter mode, overlay worker selection
-                        if matches!(self.view_mode, ViewMode::WorkerFilter) {
+                        } else if self.view_mode == ViewMode::WorkerFilter {
                             self.render_worker_filter(f, main_area);
-                        }
-
-                        // If in help mode, overlay help
-                        if matches!(self.view_mode, ViewMode::Help) {
+                        } else if self.view_mode == ViewMode::Help {
                             self.render_help(f, main_area);
                         }
                     }
@@ -637,75 +639,59 @@ impl App {
                     }
                 }
 
-                // Status bar - dynamic based on mode
-                let status_line = match &self.view_mode {
+                // Status bar keybinds
+                let status_line = match self.view_mode {
                     ViewMode::Analysis => {
-                        let mut spans = vec![
-                            Span::styled("[Q]", Style::default().fg(CAUTION_AMBER)),
-                            Span::raw(" Quit  "),
-                            Span::styled("[↑↓]", Style::default().fg(CAUTION_AMBER)),
-                            Span::raw(" Nav  "),
-                            Span::styled("[Enter]", Style::default().fg(CAUTION_AMBER)),
-                            Span::raw(" Detail  "),
-                            Span::styled("[/]", Style::default().fg(CAUTION_AMBER)),
-                            Span::raw(" Search  "),
-                            Span::styled("[F]", Style::default().fg(CAUTION_AMBER)),
-                            Span::raw(" Filter  "),
-                            Span::styled("[WASD]", Style::default().fg(CAUTION_AMBER)),
-                            Span::raw(" Zoom/Pan  "),
-                            Span::styled("[?]", Style::default().fg(CAUTION_AMBER)),
-                            Span::raw(" Help  "),
-                        ];
-
-                        if self.hotspot_view.is_filtered() {
-                            spans.push(Span::styled("[C]", Style::default().fg(CAUTION_AMBER)));
-                            spans.push(Span::raw(" Clear    "));
-                            spans
-                                .push(Span::styled("FILTERED", Style::default().fg(CAUTION_AMBER)));
+                        let mode = if self.hotspot_view.is_filtered() {
+                            Span::styled("[Filtered]", Style::default().fg(CAUTION_AMBER))
                         } else {
-                            spans.push(Span::styled("ANALYSIS", Style::default().fg(HUD_GREEN)));
-                        }
-
-                        Line::from(spans)
+                            Span::styled("[Ready]", Style::default().fg(HUD_GREEN))
+                        };
+                        Line::from(vec![
+                            Span::styled("Q", Style::default().fg(CAUTION_AMBER)),
+                            Span::styled(":Quit ", Style::default().fg(INFO_DIM)),
+                            Span::styled("/", Style::default().fg(CAUTION_AMBER)),
+                            Span::styled(":Search ", Style::default().fg(INFO_DIM)),
+                            Span::styled("F", Style::default().fg(CAUTION_AMBER)),
+                            Span::styled(":Filter ", Style::default().fg(INFO_DIM)),
+                            Span::styled("?", Style::default().fg(CAUTION_AMBER)),
+                            Span::styled(":Help ", Style::default().fg(INFO_DIM)),
+                            mode,
+                        ])
                     }
                     ViewMode::DrillDown => Line::from(vec![
-                        Span::styled("[ESC]", Style::default().fg(CAUTION_AMBER)),
-                        Span::raw(" Back  "),
-                        Span::styled("[Q]", Style::default().fg(CAUTION_AMBER)),
-                        Span::raw(" Quit    "),
-                        Span::styled("Mode: DRILL-DOWN", Style::default().fg(CAUTION_AMBER)),
+                        Span::styled("ESC", Style::default().fg(CAUTION_AMBER)),
+                        Span::styled(":Back ", Style::default().fg(INFO_DIM)),
+                        Span::styled("[Detail]", Style::default().fg(CAUTION_AMBER)),
                     ]),
                     ViewMode::Search => Line::from(vec![
-                        Span::styled("[Enter]", Style::default().fg(CAUTION_AMBER)),
-                        Span::raw(" Apply  "),
-                        Span::styled("[ESC]", Style::default().fg(CAUTION_AMBER)),
-                        Span::raw(" Cancel  "),
-                        Span::styled("[Backspace]", Style::default().fg(CAUTION_AMBER)),
-                        Span::raw(" Delete    "),
-                        Span::styled("Mode: SEARCH", Style::default().fg(CAUTION_AMBER)),
+                        Span::styled("Enter", Style::default().fg(CAUTION_AMBER)),
+                        Span::styled(":Apply ", Style::default().fg(INFO_DIM)),
+                        Span::styled("ESC", Style::default().fg(CAUTION_AMBER)),
+                        Span::styled(":Cancel ", Style::default().fg(INFO_DIM)),
+                        Span::styled("[Search]", Style::default().fg(CAUTION_AMBER)),
                     ]),
                     ViewMode::WorkerFilter => Line::from(vec![
-                        Span::styled("[↑↓]", Style::default().fg(CAUTION_AMBER)),
-                        Span::raw(" Navigate  "),
-                        Span::styled("[Space]", Style::default().fg(CAUTION_AMBER)),
-                        Span::raw(" Toggle  "),
-                        Span::styled("[A]", Style::default().fg(CAUTION_AMBER)),
-                        Span::raw(" All  "),
-                        Span::styled("[N]", Style::default().fg(CAUTION_AMBER)),
-                        Span::raw(" None  "),
-                        Span::styled("[Enter]", Style::default().fg(CAUTION_AMBER)),
-                        Span::raw(" Apply    "),
-                        Span::styled("Mode: WORKER FILTER", Style::default().fg(CAUTION_AMBER)),
+                        Span::styled("Space", Style::default().fg(CAUTION_AMBER)),
+                        Span::styled(":Toggle ", Style::default().fg(INFO_DIM)),
+                        Span::styled("A", Style::default().fg(CAUTION_AMBER)),
+                        Span::styled(":All ", Style::default().fg(INFO_DIM)),
+                        Span::styled("N", Style::default().fg(CAUTION_AMBER)),
+                        Span::styled(":None ", Style::default().fg(INFO_DIM)),
+                        Span::styled("[Filter]", Style::default().fg(CAUTION_AMBER)),
                     ]),
                     ViewMode::Help => Line::from(vec![
-                        Span::styled("Press any key to close", Style::default().fg(CAUTION_AMBER)),
-                        Span::raw("    "),
-                        Span::styled("Mode: HELP", Style::default().fg(HUD_GREEN)),
+                        Span::styled("Any key", Style::default().fg(CAUTION_AMBER)),
+                        Span::styled(":Close ", Style::default().fg(INFO_DIM)),
+                        Span::styled("[Help]", Style::default().fg(HUD_GREEN)),
                     ]),
                 };
 
-                let status =
-                    Paragraph::new(vec![status_line]).block(Block::default().borders(Borders::ALL));
+                let status = Paragraph::new(vec![status_line]).block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(HUD_GREEN)),
+                );
                 f.render_widget(status, outer_layout[2]);
             })?;
 
@@ -969,45 +955,42 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
                     ])
                     .split(f.area());
 
-                // Header with live indicator
-                let pid_display = pid.map_or_else(|| "unknown".to_string(), |p| p.to_string());
+                // Header - tactical live display
+                let pid_display = pid.map_or_else(|| "---".to_string(), |p| p.to_string());
+                let rate = if trace_data.duration > 0.0 {
+                    trace_data.events.len() as f64 / trace_data.duration
+                } else {
+                    0.0
+                };
                 let header = Paragraph::new(vec![Line::from(vec![
                     Span::styled(
-                        "hud",
+                        "HUD",
                         Style::default().fg(HUD_GREEN).add_modifier(Modifier::BOLD),
                     ),
-                    Span::styled(" v0.1.0", Style::default().fg(INFO_DIM)),
-                    Span::raw("    PID: "),
-                    Span::styled(pid_display, Style::default().fg(HUD_GREEN)),
-                    Span::raw("    Duration: "),
+                    Span::styled(" | ", Style::default().fg(INFO_DIM)),
+                    Span::styled(
+                        "[LIVE]",
+                        Style::default().fg(CRITICAL_RED).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(" | ", Style::default().fg(INFO_DIM)),
+                    Span::styled(format!("PID:{pid_display}"), Style::default().fg(HUD_GREEN)),
+                    Span::styled(" | ", Style::default().fg(INFO_DIM)),
                     Span::styled(
                         format!("{:.1}s", trace_data.duration),
                         Style::default().fg(HUD_GREEN),
                     ),
-                    Span::raw("    Events: "),
+                    Span::styled(" | ", Style::default().fg(INFO_DIM)),
                     Span::styled(
-                        format!("{}", trace_data.events.len()),
+                        format!("{} evts", trace_data.events.len()),
                         Style::default().fg(CAUTION_AMBER),
                     ),
-                    Span::raw("  ("),
-                    Span::styled(
-                        format!(
-                            "{:.0}/s",
-                            if trace_data.duration > 0.0 {
-                                trace_data.events.len() as f64 / trace_data.duration
-                            } else {
-                                0.0
-                            }
-                        ),
-                        Style::default().fg(INFO_DIM),
-                    ),
-                    Span::raw(")    "),
-                    Span::styled(
-                        "● LIVE",
-                        Style::default().fg(CRITICAL_RED).add_modifier(Modifier::BOLD),
-                    ),
+                    Span::styled(format!(" ({rate:.0}/s)"), Style::default().fg(INFO_DIM)),
                 ])])
-                .block(Block::default().borders(Borders::ALL));
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(CRITICAL_RED)),
+                );
                 f.render_widget(header, outer_layout[0]);
 
                 // Main content area
@@ -1045,35 +1028,30 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
                     render_help(f, f.area());
                 }
 
-                // Status bar
+                // Status bar keybinds
                 let mode_indicator = if app.view_mode == ViewMode::Search {
-                    Span::styled("SEARCH MODE", Style::default().fg(CAUTION_AMBER))
+                    Span::styled("[Search]", Style::default().fg(CAUTION_AMBER))
                 } else if has_events {
-                    Span::styled(
-                        "● LIVE",
-                        Style::default().fg(CRITICAL_RED).add_modifier(Modifier::BOLD),
-                    )
+                    Span::styled("[Live]", Style::default().fg(CRITICAL_RED))
                 } else {
-                    Span::styled(
-                        "AWAITING EVENTS... (generate load)",
-                        Style::default().fg(INFO_DIM),
-                    )
+                    Span::styled("[Waiting]", Style::default().fg(INFO_DIM))
                 };
 
                 let status_line = Line::from(vec![
-                    Span::styled("[Q]", Style::default().fg(CAUTION_AMBER)),
-                    Span::raw(" Quit  "),
-                    Span::styled("[↑↓]", Style::default().fg(CAUTION_AMBER)),
-                    Span::raw(" Scroll  "),
-                    Span::styled("[/]", Style::default().fg(CAUTION_AMBER)),
-                    Span::raw(" Search  "),
-                    Span::styled("[?]", Style::default().fg(CAUTION_AMBER)),
-                    Span::raw(" Help    "),
+                    Span::styled("Q", Style::default().fg(CAUTION_AMBER)),
+                    Span::styled(":Quit ", Style::default().fg(INFO_DIM)),
+                    Span::styled("/", Style::default().fg(CAUTION_AMBER)),
+                    Span::styled(":Search ", Style::default().fg(INFO_DIM)),
+                    Span::styled("?", Style::default().fg(CAUTION_AMBER)),
+                    Span::styled(":Help ", Style::default().fg(INFO_DIM)),
                     mode_indicator,
                 ]);
 
-                let status =
-                    Paragraph::new(vec![status_line]).block(Block::default().borders(Borders::ALL));
+                let status = Paragraph::new(vec![status_line]).block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(HUD_GREEN)),
+                );
                 f.render_widget(status, outer_layout[2]);
             })?;
 

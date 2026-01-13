@@ -7,9 +7,10 @@ use ratatui::{
 };
 use std::collections::HashMap;
 
-use super::{TraceData, CAUTION_AMBER, HUD_GREEN};
+use super::theme::{gauge_bar, CAUTION_AMBER, HUD_GREEN};
+use super::TraceData;
 
-/// Workers panel - shows load bars for each worker
+/// Workers panel - tactical thread load display
 pub struct WorkersPanel {
     worker_stats: HashMap<u32, WorkerStats>,
 }
@@ -40,9 +41,6 @@ impl WorkersPanel {
     pub fn render(&self, f: &mut Frame, area: Rect, data: &TraceData) {
         let mut lines = vec![];
 
-        lines.push(Line::from(""));
-
-        // Render each worker as a bar
         for worker_id in data.workers.iter() {
             if let Some(stats) = self.worker_stats.get(worker_id) {
                 let percentage = if stats.total_samples > 0 {
@@ -51,26 +49,22 @@ impl WorkersPanel {
                     0.0
                 };
 
-                // Create horizontal bar (10 characters wide)
-                let bar_width = 10;
-                let filled = ((percentage / 100.0) * bar_width as f64) as usize;
-                let empty = bar_width - filled;
-                let bar = format!("{}{}", "█".repeat(filled), "░".repeat(empty));
-
                 let bar_color = if percentage > 50.0 { CAUTION_AMBER } else { HUD_GREEN };
 
-                let marker = if percentage > 50.0 { " ⚠️" } else { "" };
-
                 lines.push(Line::from(vec![
-                    Span::raw(format!(" W{worker_id:<3} ")),
-                    Span::styled(bar, Style::default().fg(bar_color)),
-                    Span::raw(format!(" {percentage:.0}%{marker}")),
+                    Span::styled(format!("W{worker_id} "), Style::default().fg(bar_color)),
+                    Span::styled(gauge_bar(percentage, 10), Style::default().fg(bar_color)),
+                    Span::styled(format!(" {percentage:>3.0}%"), Style::default().fg(bar_color)),
                 ]));
             }
         }
 
-        let paragraph = Paragraph::new(lines)
-            .block(Block::default().borders(Borders::ALL).title("EXECUTOR THREADS"));
+        let paragraph = Paragraph::new(lines).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Workers")
+                .border_style(Style::default().fg(HUD_GREEN)),
+        );
 
         f.render_widget(paragraph, area);
     }

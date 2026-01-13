@@ -6,9 +6,10 @@ fn test_hotspot_aggregates_events_by_function_name() {
     let data = TraceData::from_file(trace_path).unwrap();
     let view = HotspotView::new(&data);
 
-    // Should aggregate 2x test_function_a, 1x test_function_b, 1x execution
+    // Should aggregate 2x test_function_a, 1x test_function_b
+    // Note: "execution" events are filtered out (scheduler/idle time)
     let hotspots = view.hotspots;
-    assert_eq!(hotspots.len(), 3);
+    assert_eq!(hotspots.len(), 2);
 }
 
 #[test]
@@ -33,15 +34,15 @@ fn test_hotspot_calculates_correct_percentages() {
     let data = TraceData::from_file(trace_path).unwrap();
     let view = HotspotView::new(&data);
 
-    // Total events: 4
-    // test_function_a: 2/4 = 50%
+    // Total function samples: 3 (execution events are filtered out)
+    // test_function_a: 2/3 = 66.67%
     let func_a = view
         .hotspots
         .iter()
         .find(|h| h.name == "test_function_a")
         .expect("Should find test_function_a");
 
-    assert!((func_a.percentage - 50.0).abs() < 0.1, "Expected 50%, got {}", func_a.percentage);
+    assert!((func_a.percentage - 66.67).abs() < 0.1, "Expected 66.67%, got {}", func_a.percentage);
 }
 
 #[test]
@@ -195,12 +196,12 @@ fn test_hotspot_scroll_up_decrements_selection() {
     let data = TraceData::from_file(trace_path).unwrap();
     let mut view = HotspotView::new(&data);
 
+    // With 2 hotspots (execution filtered out), scroll to index 1
     view.scroll_down();
-    view.scroll_down();
-    assert_eq!(view.selected_index, 2);
+    assert_eq!(view.selected_index, 1);
 
     view.scroll_up();
-    assert_eq!(view.selected_index, 1);
+    assert_eq!(view.selected_index, 0);
 }
 
 #[test]

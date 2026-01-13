@@ -1,41 +1,40 @@
 //! TUI color theme
 //!
-//! HUD-inspired color scheme for the terminal interface
+//! F-35 glass cockpit inspired color scheme
 
 use ratatui::style::Color;
 
-// HUD color scheme (F-35 inspired)
+// F-35 HUD color scheme
 pub const HUD_GREEN: Color = Color::Rgb(0, 255, 0);
 pub const CRITICAL_RED: Color = Color::Rgb(255, 0, 0);
 pub const CAUTION_AMBER: Color = Color::Rgb(255, 191, 0);
 pub const INFO_DIM: Color = Color::Rgb(0, 180, 0);
 pub const BACKGROUND: Color = Color::Rgb(0, 20, 0);
 
-/// Get severity color based on percentage threshold
-/// - Above 40%: Critical (Red)
-/// - Above 20%: Caution (Amber)
-/// - Otherwise: Normal (Green)
-#[must_use]
-#[allow(dead_code)] // Available for future use
-pub fn severity_color(percentage: f64) -> Color {
-    if percentage > 40.0 {
-        CRITICAL_RED
-    } else if percentage > 20.0 {
-        CAUTION_AMBER
-    } else {
-        HUD_GREEN
-    }
-}
+// Tactical symbols (ASCII-only for terminal compatibility)
+pub const SEL_CURSOR: &str = ">>>";
+pub const MARKER_CRIT: &str = "[X]";
+pub const MARKER_WARN: &str = "[!]";
+pub const MARKER_OK: &str = "[-]";
+pub const BAR_FULL: &str = "|";
+pub const BAR_EMPTY: &str = " ";
 
-/// Get severity marker (emoji) and color based on percentage
-/// Returns `(marker, color)` tuple for display
+/// Get tactical severity marker and color
 #[must_use]
 pub fn severity_marker(percentage: f64) -> (&'static str, Color) {
     if percentage > 40.0 {
-        ("🔴", CRITICAL_RED)
+        (MARKER_CRIT, CRITICAL_RED)
     } else if percentage > 20.0 {
-        ("🟡", CAUTION_AMBER)
+        (MARKER_WARN, CAUTION_AMBER)
     } else {
-        ("🟢", HUD_GREEN)
+        (MARKER_OK, HUD_GREEN)
     }
+}
+
+/// Generate a horizontal gauge bar
+#[must_use]
+pub fn gauge_bar(percentage: f64, width: usize) -> String {
+    let filled = ((percentage / 100.0) * width as f64) as usize;
+    let empty = width.saturating_sub(filled);
+    format!("[{}{}]", BAR_FULL.repeat(filled), BAR_EMPTY.repeat(empty))
 }

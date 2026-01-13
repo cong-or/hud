@@ -27,6 +27,9 @@ type FunctionData = (HashMap<u32, usize>, Option<String>, Option<u32>);
 /// This function aggregates trace events by function name, counts occurrences,
 /// calculates percentages, and sorts by frequency (descending).
 ///
+/// Note: "execution" events (scheduler/idle time) are filtered out to show
+/// only actual function samples.
+///
 /// # Arguments
 /// * `data` - The trace data to analyze
 ///
@@ -35,9 +38,16 @@ type FunctionData = (HashMap<u32, usize>, Option<String>, Option<u32>);
 #[must_use]
 pub fn analyze_hotspots(data: &TraceData) -> Vec<FunctionHotspot> {
     // Aggregate events by function name, capturing file/line from first occurrence
+    // Filter out "execution" events which represent scheduler/idle time
     let mut function_data: HashMap<String, FunctionData> = HashMap::new();
+    let mut total_samples: usize = 0;
 
     for event in data.events.iter() {
+        // Skip execution events - they're scheduler/idle time, not actual functions
+        if event.name == "execution" {
+            continue;
+        }
+        total_samples += 1;
         let entry = function_data
             .entry(event.name.clone())
             .or_insert_with(|| (HashMap::new(), event.file.clone(), event.line));
@@ -45,18 +55,18 @@ pub fn analyze_hotspots(data: &TraceData) -> Vec<FunctionHotspot> {
     }
 
     // Convert to vector and calculate percentages
-    let total_samples = data.events.len();
     let mut hotspots: Vec<FunctionHotspot> = function_data
         .into_iter()
         .map(|(name, (workers, file, line))| {
             let count: usize = workers.values().sum();
-            let percentage = (count as f64 / total_samples as f64) * 100.0;
+            let percentage =
+                if total_samples > 0 { (count as f64 / total_samples as f64) * 100.0 } else { 0.0 };
             FunctionHotspot { name, count, percentage, workers, file, line }
         })
         .collect();
 
-    // Sort by count (descending)
-    hotspots.sort_by(|a, b| b.count.cmp(&a.count));
+    // Sort by count (descending) - unstable sort is faster
+    hotspots.sort_unstable_by_key(|h| std::cmp::Reverse(h.count));
 
     hotspots
 }

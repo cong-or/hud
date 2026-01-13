@@ -1,19 +1,20 @@
 use ratatui::{
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
     Frame,
 };
 use std::collections::HashMap;
 
+use super::theme::{gauge_bar, CAUTION_AMBER, CRITICAL_RED, HUD_GREEN, INFO_DIM};
 use super::TraceData;
 
-/// Timeline view showing worker activity over time
+/// Timeline view - tactical activity display
 pub struct TimelineView {
     worker_stats: HashMap<u32, WorkerStats>,
-    zoom_level: f64, // 1.0 = normal, >1.0 = zoomed in
-    pan_offset: f64, // 0.0 to 1.0, position in timeline
+    zoom_level: f64,
+    pan_offset: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -25,8 +26,7 @@ struct WorkerStats {
 
 impl TimelineView {
     pub fn new(data: &TraceData) -> Self {
-        // Calculate statistics for each worker
-        let mut worker_stats: HashMap<u32, WorkerStats> = HashMap::new();
+        let mut worker_stats = HashMap::new();
 
         for event in data.events.iter() {
             let stats = worker_stats.entry(event.worker_id).or_insert(WorkerStats {
@@ -50,7 +50,6 @@ impl TimelineView {
 
     pub fn zoom_out(&mut self) {
         self.zoom_level = (self.zoom_level / 1.5).max(1.0);
-        // Reset pan when fully zoomed out (using <= for robustness)
         if self.zoom_level <= 1.0 {
             self.pan_offset = 0.0;
         }
@@ -72,94 +71,64 @@ impl TimelineView {
     pub fn render(&self, f: &mut Frame, area: Rect, data: &TraceData) {
         let mut lines = vec![];
 
-        // Title and info with zoom level
-        let zoom_text = if self.zoom_level > 1.0 {
-            format!("  Zoom: {:.1}x  Pan: {:.0}%", self.zoom_level, self.pan_offset * 100.0)
+        // Header stats
+        let zoom_info = if self.zoom_level > 1.0 {
+            format!(" Z:{:.1}x", self.zoom_level)
         } else {
             String::new()
         };
 
         lines.push(Line::from(vec![
-            Span::styled(
-                format!("Duration: {:.1}s", data.duration),
-                Style::default().fg(Color::Cyan),
-            ),
-            Span::raw("    Total events: "),
-            Span::styled(data.events.len().to_string(), Style::default().fg(Color::Green)),
-            Span::styled(zoom_text, Style::default().fg(Color::Yellow)),
+            Span::styled("Duration ", Style::default().fg(INFO_DIM)),
+            Span::styled(format!("{:.1}s", data.duration), Style::default().fg(HUD_GREEN)),
+            Span::raw("  "),
+            Span::styled("Events ", Style::default().fg(INFO_DIM)),
+            Span::styled(format!("{}", data.events.len()), Style::default().fg(HUD_GREEN)),
+            Span::styled(zoom_info, Style::default().fg(CAUTION_AMBER)),
         ]));
-        lines.push(Line::from(""));
 
-        // Column headers
-        lines.push(Line::from(vec![
-            Span::styled("Worker", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("    "),
-            Span::styled("TID", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("      "),
-            Span::styled(
-                "Samples",
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("    "),
-            Span::styled(
-                "Activity",
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-            ),
-        ]));
-        lines.push(Line::from("─".repeat(70)));
+        // Column header
+        lines.push(Line::from(vec![Span::styled(
+            "ID  TID      Samples  Load",
+            Style::default().fg(INFO_DIM).add_modifier(Modifier::BOLD),
+        )]));
 
         // Worker rows
         for worker_id in data.workers.iter() {
             if let Some(stats) = self.worker_stats.get(worker_id) {
-                let success_rate = if stats.total_samples > 0 {
+                let rate = if stats.total_samples > 0 {
                     (stats.samples_with_functions as f64 / stats.total_samples as f64) * 100.0
                 } else {
                     0.0
                 };
 
-                // Create a visual bar showing activity
-                let bar_width = 30;
-                let filled = ((success_rate / 100.0) * bar_width as f64) as usize;
-                let empty = bar_width - filled;
-                let bar = format!("{}{}", "▓".repeat(filled), "░".repeat(empty));
-
-                // Color based on activity level
-                let (bar_color, marker) = if success_rate > 50.0 {
-                    (Color::Red, " ⚠️ ")
-                } else if success_rate > 20.0 {
-                    (Color::Yellow, " ")
+                let color = if rate > 50.0 {
+                    CRITICAL_RED
+                } else if rate > 20.0 {
+                    CAUTION_AMBER
                 } else {
-                    (Color::Green, " ")
+                    HUD_GREEN
                 };
 
                 lines.push(Line::from(vec![
-                    Span::raw(format!("{:<8}", format!("Worker {}", worker_id))),
-                    Span::styled(format!("{:<8}", stats.tid), Style::default().fg(Color::DarkGray)),
-                    Span::raw(format!(
-                        "{:>4}/{:<4}",
-                        stats.samples_with_functions, stats.total_samples
-                    )),
-                    Span::raw("  "),
-                    Span::styled(bar, Style::default().fg(bar_color)),
-                    Span::raw(format!(" {success_rate:.0}%")),
-                    Span::raw(marker),
+                    Span::styled(format!("W{worker_id:<2} "), Style::default().fg(color)),
+                    Span::styled(format!("{:<8} ", stats.tid), Style::default().fg(INFO_DIM)),
+                    Span::styled(
+                        format!("{:>4}/{:<4} ", stats.samples_with_functions, stats.total_samples),
+                        Style::default().fg(HUD_GREEN),
+                    ),
+                    Span::styled(gauge_bar(rate, 12), Style::default().fg(color)),
+                    Span::styled(format!(" {rate:>3.0}%"), Style::default().fg(color)),
                 ]));
             }
         }
 
-        lines.push(Line::from(""));
-        lines.push(Line::from(vec![
-            Span::styled("Legend: ", Style::default().fg(Color::DarkGray)),
-            Span::styled("▓", Style::default().fg(Color::Red)),
-            Span::raw(" Active (function known)  "),
-            Span::styled("░", Style::default().fg(Color::Green)),
-            Span::raw(" Idle/Generic  "),
-            Span::styled("⚠️ ", Style::default()),
-            Span::raw(" High CPU (>50%)"),
-        ]));
-
-        let paragraph = Paragraph::new(lines)
-            .block(Block::default().borders(Borders::ALL).title("Worker Timeline"));
+        let paragraph = Paragraph::new(lines).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Activity")
+                .border_style(Style::default().fg(HUD_GREEN)),
+        );
 
         f.render_widget(paragraph, area);
     }
