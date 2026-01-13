@@ -91,7 +91,6 @@ All updating in real-time as your code runs.
 ## Docs
 
 - [Architecture](docs/ARCHITECTURE.md) - Internals
-- [TUI Guide](docs/TUI.md) - Interface details
 - [Troubleshooting](docs/TROUBLESHOOTING.md) - Common issues
 - [Development](docs/DEVELOPMENT.md) - Contributing
 
