@@ -2,6 +2,14 @@
 
 Common issues and solutions for hud.
 
+## Quick Diagnostic
+
+```bash
+uname -r                           # Kernel 5.8+ required
+ps -T -p <PID> | grep tokio        # Verify Tokio workers exist
+readlink -f /proc/<PID>/exe        # Get actual binary path
+```
+
 ## No Function Names Displayed
 
 **Symptom:** You see timings but function names show as `<unknown>` or hex addresses.

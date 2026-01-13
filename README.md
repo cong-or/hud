@@ -9,20 +9,12 @@ A KISS Linux tool. One job: find what's blocking your Tokio runtime.
 Minimal-overhead eBPF profiling. Attach to any running process, no code changes needed.
 
 ```bash
-sudo ./hud --pid $(pgrep my-app) --target ./my-app
+sudo ./hud --pid $(pgrep my-server) --target ./my-server
 ```
 
 ## The Problem
 
 Tokio uses cooperative scheduling. Tasks yield at `.await` points, trusting that work between awaits is fast. When it isn't—CPU-heavy code, sync I/O, blocking locks—one task starves the rest.
-
-```rust
-async fn handle(req: Request) -> Response {
-    let user = db.get_user(id).await;
-    let report = generate_pdf(&user);  // CPU-bound, blocks worker
-    Response::ok(report)
-}
-```
 
 These bugs are silent. No errors, no panics—just degraded throughput. hud makes them visible.
 
@@ -38,7 +30,8 @@ Under the hood:
 
 **System:**
 - Linux 5.8+ (eBPF ring buffer support)
-- Root or CAP_BPF privileges (for eBPF attachment)
+- x86_64 or aarch64 architecture
+- Root or CAP_BPF privileges
 
 **Target binary must have debug symbols:**
 ```toml
@@ -51,20 +44,24 @@ force-frame-pointers = true
 ## Quick Start
 
 ```bash
-# Build
-cargo xtask build-ebpf --release && cargo build --release
+# Build hud and demo app
+cargo xtask build-ebpf --release && cargo build --release --examples
 
-# Run test app
-cargo build --release --example test-async-app
-./target/release/examples/test-async-app &
+# Run demo server
+./target/release/examples/demo-server &
 
-# Profile (live TUI appears)
-sudo -E ./target/release/hud --pid $! --target ./target/release/examples/test-async-app
+# Profile it (TUI appears)
+sudo -E ./target/release/hud --pid $(pgrep demo-server) --target ./target/release/examples/demo-server
 
-# Press Q to quit
+# Generate load (in another terminal)
+curl -X POST http://localhost:3000/process -H "Content-Type: application/json" -d '{"data":"test"}'
+
+# Press Q to quit hud
 ```
 
 ## Usage
+
+All commands require root. Use `sudo -E` to preserve environment variables.
 
 ```bash
 # Live TUI

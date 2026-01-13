@@ -102,17 +102,17 @@ cargo test --package hud --lib tui::hotspot
 ### Integration Testing
 
 ```bash
-# Build test application
-cargo build --release --example test-async-app
+# Build demo application
+cargo build --release --example demo-server
 
-# Run test app in background
-./target/release/examples/test-async-app &
+# Run demo server in background
+./target/release/examples/demo-server &
 TEST_PID=$!
 
 # Profile it
 sudo -E ./target/release/hud \
   --pid $TEST_PID \
-  --target ./target/release/examples/test-async-app \
+  --target ./target/release/examples/demo-server \
   --duration 10
 
 # Cleanup
