@@ -9,3 +9,5 @@ target/
 
 # Working notes and temporary files
 /notes/
+trace.json
+hud.log
