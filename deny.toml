@@ -9,11 +9,9 @@ ignore = [
 allow = [
     "MIT",
     "Apache-2.0",
-    "BSD-2-Clause",
     "BSD-3-Clause",
-    "ISC",
     "Zlib",
-    "MPL-2.0",
+    "Unicode-DFS-2016",
 ]
 confidence-threshold = 0.8
 

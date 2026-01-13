@@ -305,9 +305,10 @@ impl App {
             Block::default()
                 .borders(Borders::ALL)
                 .title(format!("Worker Filter ({} selected)", self.selected_workers.len()))
-                .style(Style::default().bg(BACKGROUND).fg(HUD_GREEN)),
+                .style(Style::default().bg(ratatui::style::Color::Black).fg(HUD_GREEN)),
         );
 
+        f.render_widget(ratatui::widgets::Clear, popup_area);
         f.render_widget(widget, popup_area);
     }
 
@@ -334,6 +335,9 @@ impl App {
                 .split(vertical[1])[1]
         };
 
+        use ratatui::style::Color;
+        let text_color = Color::White;
+
         let help_text = vec![
             Line::from(""),
             Line::from(vec![Span::styled(
@@ -342,15 +346,15 @@ impl App {
             )]),
             Line::from(vec![
                 Span::styled("  ↑↓", Style::default().fg(CAUTION_AMBER)),
-                Span::raw("      Scroll hotspots"),
+                Span::styled("      Scroll hotspots", Style::default().fg(text_color)),
             ]),
             Line::from(vec![
                 Span::styled("  Enter", Style::default().fg(CAUTION_AMBER)),
-                Span::raw("   Drill-down to function"),
+                Span::styled("   Drill-down to function", Style::default().fg(text_color)),
             ]),
             Line::from(vec![
                 Span::styled("  WASD", Style::default().fg(CAUTION_AMBER)),
-                Span::raw("    Zoom/pan timeline"),
+                Span::styled("    Zoom/pan timeline", Style::default().fg(text_color)),
             ]),
             Line::from(""),
             Line::from(vec![Span::styled(
@@ -359,20 +363,20 @@ impl App {
             )]),
             Line::from(vec![
                 Span::styled("  /", Style::default().fg(CAUTION_AMBER)),
-                Span::raw("       Search functions"),
+                Span::styled("       Search functions", Style::default().fg(text_color)),
             ]),
             Line::from(vec![
                 Span::styled("  F", Style::default().fg(CAUTION_AMBER)),
-                Span::raw("       Filter by worker"),
+                Span::styled("       Filter by worker", Style::default().fg(text_color)),
             ]),
             Line::from(vec![
                 Span::styled("  C", Style::default().fg(CAUTION_AMBER)),
-                Span::raw("       Clear filters"),
+                Span::styled("       Clear filters", Style::default().fg(text_color)),
             ]),
             Line::from(""),
             Line::from(vec![
                 Span::styled("  Q", Style::default().fg(CAUTION_AMBER)),
-                Span::raw("       Quit"),
+                Span::styled("       Quit", Style::default().fg(text_color)),
             ]),
         ];
 
@@ -380,9 +384,10 @@ impl App {
             Block::default()
                 .borders(Borders::ALL)
                 .title(" Keyboard Shortcuts ")
-                .style(Style::default().bg(BACKGROUND).fg(HUD_GREEN)),
+                .style(Style::default().bg(Color::Black).fg(HUD_GREEN)),
         );
 
+        f.render_widget(ratatui::widgets::Clear, popup_area);
         f.render_widget(help_widget, popup_area);
     }
 
@@ -415,10 +420,11 @@ impl App {
                 Block::default()
                     .borders(Borders::ALL)
                     .title("Filter Functions")
-                    .style(Style::default().bg(BACKGROUND).fg(HUD_GREEN)),
+                    .style(Style::default().bg(ratatui::style::Color::Black).fg(HUD_GREEN)),
             )
             .style(Style::default().fg(CAUTION_AMBER));
 
+        f.render_widget(ratatui::widgets::Clear, popup_area);
         f.render_widget(search_widget, popup_area);
     }
 
@@ -742,6 +748,9 @@ fn render_help(f: &mut ratatui::Frame, area: Rect) {
             .split(vertical[1])[1]
     };
 
+    use ratatui::style::Color;
+    let text_color = Color::White;
+
     let help_text = vec![
         Line::from(""),
         Line::from(vec![Span::styled(
@@ -750,32 +759,33 @@ fn render_help(f: &mut ratatui::Frame, area: Rect) {
         )]),
         Line::from(vec![
             Span::styled("  ↑↓", Style::default().fg(CAUTION_AMBER)),
-            Span::raw("      Scroll hotspots"),
+            Span::styled("      Scroll hotspots", Style::default().fg(text_color)),
         ]),
         Line::from(vec![
             Span::styled("  /", Style::default().fg(CAUTION_AMBER)),
-            Span::raw("       Search functions"),
+            Span::styled("       Search functions", Style::default().fg(text_color)),
         ]),
         Line::from(vec![
             Span::styled("  C", Style::default().fg(CAUTION_AMBER)),
-            Span::raw("       Clear filters"),
+            Span::styled("       Clear filters", Style::default().fg(text_color)),
         ]),
         Line::from(""),
         Line::from(vec![
             Span::styled("  Q", Style::default().fg(CAUTION_AMBER)),
-            Span::raw("       Quit"),
+            Span::styled("       Quit", Style::default().fg(text_color)),
         ]),
         Line::from(""),
-        Line::from(vec![Span::styled("  Press any key to close", Style::default().fg(INFO_DIM))]),
+        Line::from(vec![Span::styled("  Press any key to close", Style::default().fg(text_color))]),
     ];
 
     let help_widget = Paragraph::new(help_text).block(
         Block::default()
             .borders(Borders::ALL)
             .title(" Keyboard Shortcuts ")
-            .style(Style::default().bg(BACKGROUND).fg(HUD_GREEN)),
+            .style(Style::default().bg(Color::Black).fg(HUD_GREEN)),
     );
 
+    f.render_widget(ratatui::widgets::Clear, popup_area);
     f.render_widget(help_widget, popup_area);
 }
 
@@ -807,10 +817,11 @@ fn render_search_overlay(f: &mut ratatui::Frame, area: Rect, query: &str) {
             Block::default()
                 .borders(Borders::ALL)
                 .title("Filter Functions (Enter to apply, Esc to cancel)")
-                .style(Style::default().bg(BACKGROUND).fg(HUD_GREEN)),
+                .style(Style::default().bg(ratatui::style::Color::Black).fg(HUD_GREEN)),
         )
         .style(Style::default().fg(CAUTION_AMBER));
 
+    f.render_widget(ratatui::widgets::Clear, popup_area);
     f.render_widget(search_widget, popup_area);
 }
 

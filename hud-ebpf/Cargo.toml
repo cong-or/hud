@@ -2,6 +2,7 @@
 name = "hud-ebpf"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
 
 [dependencies]
 aya-ebpf = { version = "0.1", default-features = false }
