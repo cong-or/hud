@@ -5,6 +5,8 @@ members = [
     "hud-common",
     "xtask",
 ]
+# hud-ebpf requires special cross-compilation, exclude from default builds
+default-members = ["hud", "hud-common", "xtask"]
 resolver = "2"
 
 [workspace.dependencies]

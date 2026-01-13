@@ -249,8 +249,6 @@ impl HotspotView {
                     ]));
                 }
             }
-
-            lines.push(Line::from(""));
         }
 
         let title = if self.filter_active {

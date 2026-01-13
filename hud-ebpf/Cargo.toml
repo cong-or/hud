@@ -8,7 +8,7 @@ aya-ebpf = { version = "0.1", default-features = false }
 hud-common = { path = "../hud-common" }
 
 [[bin]]
-name = "hud"
+name = "hud-ebpf"
 path = "src/main.rs"
 
 [profile.dev]

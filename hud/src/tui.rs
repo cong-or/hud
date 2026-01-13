@@ -67,12 +67,13 @@ use workers::WorkersPanel;
 pub use crate::trace_data::{LiveData, TraceData, TraceEvent};
 
 /// View mode for the TUI
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum ViewMode {
     Analysis,
     DrillDown,
     Search,
     WorkerFilter,
+    Help,
 }
 
 /// Main TUI application state
@@ -150,8 +151,15 @@ impl App {
                     KeyCode::Char('d' | 'D') => {
                         self.timeline_view.pan_right();
                     }
+                    KeyCode::Char('?') => {
+                        self.view_mode = ViewMode::Help;
+                    }
                     _ => {}
                 }
+            }
+            ViewMode::Help => {
+                // Any key closes help
+                self.view_mode = ViewMode::Analysis;
             }
             ViewMode::DrillDown => match key {
                 KeyCode::Esc | KeyCode::Char('q' | 'Q') => {
@@ -301,6 +309,81 @@ impl App {
         );
 
         f.render_widget(widget, popup_area);
+    }
+
+    /// Render help overlay
+    #[allow(clippy::unused_self)]
+    fn render_help(&self, f: &mut ratatui::Frame, area: Rect) {
+        let popup_area = {
+            let vertical = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Percentage(15),
+                    Constraint::Length(16),
+                    Constraint::Percentage(35),
+                ])
+                .split(area);
+
+            Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([
+                    Constraint::Percentage(25),
+                    Constraint::Percentage(50),
+                    Constraint::Percentage(25),
+                ])
+                .split(vertical[1])[1]
+        };
+
+        let help_text = vec![
+            Line::from(""),
+            Line::from(vec![Span::styled(
+                "  Navigation",
+                Style::default().fg(HUD_GREEN).add_modifier(Modifier::BOLD),
+            )]),
+            Line::from(vec![
+                Span::styled("  ↑↓", Style::default().fg(CAUTION_AMBER)),
+                Span::raw("      Scroll hotspots"),
+            ]),
+            Line::from(vec![
+                Span::styled("  Enter", Style::default().fg(CAUTION_AMBER)),
+                Span::raw("   Drill-down to function"),
+            ]),
+            Line::from(vec![
+                Span::styled("  WASD", Style::default().fg(CAUTION_AMBER)),
+                Span::raw("    Zoom/pan timeline"),
+            ]),
+            Line::from(""),
+            Line::from(vec![Span::styled(
+                "  Filtering",
+                Style::default().fg(HUD_GREEN).add_modifier(Modifier::BOLD),
+            )]),
+            Line::from(vec![
+                Span::styled("  /", Style::default().fg(CAUTION_AMBER)),
+                Span::raw("       Search functions"),
+            ]),
+            Line::from(vec![
+                Span::styled("  F", Style::default().fg(CAUTION_AMBER)),
+                Span::raw("       Filter by worker"),
+            ]),
+            Line::from(vec![
+                Span::styled("  C", Style::default().fg(CAUTION_AMBER)),
+                Span::raw("       Clear filters"),
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("  Q", Style::default().fg(CAUTION_AMBER)),
+                Span::raw("       Quit"),
+            ]),
+        ];
+
+        let help_widget = Paragraph::new(help_text).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Keyboard Shortcuts ")
+                .style(Style::default().bg(BACKGROUND).fg(HUD_GREEN)),
+        );
+
+        f.render_widget(help_widget, popup_area);
     }
 
     /// Render search input overlay
@@ -494,7 +577,10 @@ impl App {
                 let main_area = outer_layout[1];
 
                 match self.view_mode {
-                    ViewMode::Analysis | ViewMode::Search | ViewMode::WorkerFilter => {
+                    ViewMode::Analysis
+                    | ViewMode::Search
+                    | ViewMode::WorkerFilter
+                    | ViewMode::Help => {
                         // Glass Cockpit: Four-panel layout (2x2 grid)
 
                         // Split into top and bottom rows
@@ -539,6 +625,11 @@ impl App {
                         if matches!(self.view_mode, ViewMode::WorkerFilter) {
                             self.render_worker_filter(f, main_area);
                         }
+
+                        // If in help mode, overlay help
+                        if matches!(self.view_mode, ViewMode::Help) {
+                            self.render_help(f, main_area);
+                        }
                     }
                     ViewMode::DrillDown => {
                         // Show drill-down view
@@ -562,6 +653,8 @@ impl App {
                             Span::raw(" Filter  "),
                             Span::styled("[WASD]", Style::default().fg(CAUTION_AMBER)),
                             Span::raw(" Zoom/Pan  "),
+                            Span::styled("[?]", Style::default().fg(CAUTION_AMBER)),
+                            Span::raw(" Help  "),
                         ];
 
                         if self.hotspot_view.is_filtered() {
@@ -604,6 +697,11 @@ impl App {
                         Span::raw(" Apply    "),
                         Span::styled("Mode: WORKER FILTER", Style::default().fg(CAUTION_AMBER)),
                     ]),
+                    ViewMode::Help => Line::from(vec![
+                        Span::styled("Press any key to close", Style::default().fg(CAUTION_AMBER)),
+                        Span::raw("    "),
+                        Span::styled("Mode: HELP", Style::default().fg(HUD_GREEN)),
+                    ]),
                 };
 
                 let status =
@@ -634,6 +732,196 @@ impl App {
     }
 }
 
+// Standalone helper functions for overlays
+
+/// Render help overlay (standalone version)
+fn render_help(f: &mut ratatui::Frame, area: Rect) {
+    let popup_area = {
+        let vertical = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Percentage(15),
+                Constraint::Length(16),
+                Constraint::Percentage(35),
+            ])
+            .split(area);
+
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(25),
+                Constraint::Percentage(50),
+                Constraint::Percentage(25),
+            ])
+            .split(vertical[1])[1]
+    };
+
+    let help_text = vec![
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            "  Navigation",
+            Style::default().fg(HUD_GREEN).add_modifier(Modifier::BOLD),
+        )]),
+        Line::from(vec![
+            Span::styled("  ↑↓", Style::default().fg(CAUTION_AMBER)),
+            Span::raw("      Scroll hotspots"),
+        ]),
+        Line::from(vec![
+            Span::styled("  /", Style::default().fg(CAUTION_AMBER)),
+            Span::raw("       Search functions"),
+        ]),
+        Line::from(vec![
+            Span::styled("  C", Style::default().fg(CAUTION_AMBER)),
+            Span::raw("       Clear filters"),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Q", Style::default().fg(CAUTION_AMBER)),
+            Span::raw("       Quit"),
+        ]),
+        Line::from(""),
+        Line::from(vec![Span::styled("  Press any key to close", Style::default().fg(INFO_DIM))]),
+    ];
+
+    let help_widget = Paragraph::new(help_text).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Keyboard Shortcuts ")
+            .style(Style::default().bg(BACKGROUND).fg(HUD_GREEN)),
+    );
+
+    f.render_widget(help_widget, popup_area);
+}
+
+/// Render search input overlay (standalone version)
+fn render_search_overlay(f: &mut ratatui::Frame, area: Rect, query: &str) {
+    let popup_area = {
+        let vertical = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Percentage(40),
+                Constraint::Length(3),
+                Constraint::Percentage(60),
+            ])
+            .split(area);
+
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(20),
+                Constraint::Percentage(60),
+                Constraint::Percentage(20),
+            ])
+            .split(vertical[1])[1]
+    };
+
+    let search_text = format!("Search: {query}_");
+    let search_widget = Paragraph::new(search_text)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Filter Functions (Enter to apply, Esc to cancel)")
+                .style(Style::default().bg(BACKGROUND).fg(HUD_GREEN)),
+        )
+        .style(Style::default().fg(CAUTION_AMBER));
+
+    f.render_widget(search_widget, popup_area);
+}
+
+/// Live TUI state (similar to App but with dynamic data)
+struct LiveApp {
+    live_data: LiveData,
+    hotspot_view: Option<HotspotView>,
+    view_mode: ViewMode,
+    search_query: String,
+    should_quit: bool,
+}
+
+impl LiveApp {
+    fn new() -> Self {
+        Self {
+            live_data: LiveData::new(),
+            hotspot_view: None,
+            view_mode: ViewMode::Analysis,
+            search_query: String::new(),
+            should_quit: false,
+        }
+    }
+
+    fn handle_key(&mut self, key: KeyCode) {
+        match self.view_mode {
+            ViewMode::Analysis => match key {
+                KeyCode::Char('q' | 'Q') => self.should_quit = true,
+                KeyCode::Up => {
+                    if let Some(hv) = &mut self.hotspot_view {
+                        hv.scroll_up();
+                    }
+                }
+                KeyCode::Down => {
+                    if let Some(hv) = &mut self.hotspot_view {
+                        hv.scroll_down();
+                    }
+                }
+                KeyCode::Char('/') => {
+                    self.view_mode = ViewMode::Search;
+                    self.search_query.clear();
+                }
+                KeyCode::Char('c' | 'C') => {
+                    if let Some(hv) = &mut self.hotspot_view {
+                        hv.clear_filter();
+                    }
+                }
+                KeyCode::Char('?') => self.view_mode = ViewMode::Help,
+                _ => {}
+            },
+            ViewMode::Search => match key {
+                KeyCode::Esc => {
+                    self.view_mode = ViewMode::Analysis;
+                    self.search_query.clear();
+                }
+                KeyCode::Enter => {
+                    if let Some(hv) = &mut self.hotspot_view {
+                        hv.apply_filter(&self.search_query);
+                    }
+                    self.view_mode = ViewMode::Analysis;
+                }
+                KeyCode::Backspace => {
+                    self.search_query.pop();
+                }
+                KeyCode::Char(c) => self.search_query.push(c),
+                _ => {}
+            },
+            ViewMode::Help => self.view_mode = ViewMode::Analysis,
+            _ => {
+                if matches!(key, KeyCode::Esc | KeyCode::Char('q' | 'Q')) {
+                    self.view_mode = ViewMode::Analysis;
+                }
+            }
+        }
+    }
+
+    fn update_hotspot_view(&mut self, trace_data: &TraceData) {
+        let (old_selected, old_filter) = self
+            .hotspot_view
+            .as_ref()
+            .map_or((0, false), |hv| (hv.selected_index, hv.is_filtered()));
+
+        let mut new_view = HotspotView::new(trace_data);
+
+        // Restore selection if still valid
+        if old_selected < new_view.hotspots.len() {
+            new_view.selected_index = old_selected;
+        }
+
+        // Re-apply filter if active
+        if old_filter && !self.search_query.is_empty() {
+            new_view.apply_filter(&self.search_query);
+        }
+
+        self.hotspot_view = Some(new_view);
+    }
+}
+
 /// Run TUI in live mode, receiving events from a channel
 ///
 /// # Errors
@@ -646,27 +934,27 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // Live data accumulator
-    let mut live_data = LiveData::new();
-    let mut should_quit = false;
+    // Live app state
+    let mut app = LiveApp::new();
     let mut last_update = std::time::Instant::now();
-    const UPDATE_INTERVAL: Duration = Duration::from_millis(100); // Redraw every 100ms
+    const UPDATE_INTERVAL: Duration = Duration::from_millis(100);
 
     // Main loop
     loop {
         // Process incoming events (non-blocking)
         while let Ok(event) = event_rx.try_recv() {
-            live_data.add_event(event);
+            app.live_data.add_event(event);
         }
 
         // Convert to TraceData for rendering
-        let trace_data = live_data.as_trace_data();
+        let trace_data = app.live_data.as_trace_data();
 
-        // Redraw periodically (even when idle, to show waiting state)
+        // Redraw periodically
         if last_update.elapsed() >= UPDATE_INTERVAL {
-            // Rebuild panels with latest data
+            // Update hotspot view (preserves selection)
+            app.update_hotspot_view(&trace_data);
+
             let status_panel = StatusPanel::new(&trace_data);
-            let hotspot_view = HotspotView::new(&trace_data);
             let workers_panel = WorkersPanel::new(&trace_data);
             let timeline_view = TimelineView::new(&trace_data);
             let has_events = !trace_data.events.is_empty();
@@ -676,7 +964,7 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
                     .direction(Direction::Vertical)
                     .constraints([
                         Constraint::Length(3), // Header
-                        Constraint::Min(0),    // Main glass cockpit panels
+                        Constraint::Min(0),    // Main panels
                         Constraint::Length(3), // Status bar
                     ])
                     .split(f.area());
@@ -701,7 +989,19 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
                         format!("{}", trace_data.events.len()),
                         Style::default().fg(CAUTION_AMBER),
                     ),
-                    Span::raw("    "),
+                    Span::raw("  ("),
+                    Span::styled(
+                        format!(
+                            "{:.0}/s",
+                            if trace_data.duration > 0.0 {
+                                trace_data.events.len() as f64 / trace_data.duration
+                            } else {
+                                0.0
+                            }
+                        ),
+                        Style::default().fg(INFO_DIM),
+                    ),
+                    Span::raw(")    "),
                     Span::styled(
                         "● LIVE",
                         Style::default().fg(CRITICAL_RED).add_modifier(Modifier::BOLD),
@@ -710,58 +1010,65 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
                 .block(Block::default().borders(Borders::ALL));
                 f.render_widget(header, outer_layout[0]);
 
-                // Main content area - Glass Cockpit layout
+                // Main content area
                 let main_area = outer_layout[1];
-
-                // Split into top and bottom rows
                 let rows = Layout::default()
                     .direction(Direction::Vertical)
-                    .constraints([
-                        Constraint::Percentage(50), // Top row
-                        Constraint::Percentage(50), // Bottom row
-                    ])
+                    .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
                     .split(main_area);
 
-                // Top row: Status (left) | Hotspots (right)
                 let top_cols = Layout::default()
                     .direction(Direction::Horizontal)
-                    .constraints([
-                        Constraint::Percentage(30), // Status panel
-                        Constraint::Percentage(70), // Hotspots panel
-                    ])
+                    .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
                     .split(rows[0]);
 
-                // Bottom row: Workers (left) | Timeline (right)
                 let bottom_cols = Layout::default()
                     .direction(Direction::Horizontal)
-                    .constraints([
-                        Constraint::Percentage(30), // Workers panel
-                        Constraint::Percentage(70), // Timeline panel
-                    ])
+                    .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
                     .split(rows[1]);
 
-                // Render all four panels
+                // Render panels
                 status_panel.render(f, top_cols[0], &trace_data);
-                hotspot_view.render(f, top_cols[1], &trace_data);
+                if let Some(ref hv) = app.hotspot_view {
+                    hv.render(f, top_cols[1], &trace_data);
+                }
                 workers_panel.render(f, bottom_cols[0], &trace_data);
                 timeline_view.render(f, bottom_cols[1], &trace_data);
 
+                // Search overlay
+                if app.view_mode == ViewMode::Search {
+                    render_search_overlay(f, f.area(), &app.search_query);
+                }
+
+                // Help overlay
+                if app.view_mode == ViewMode::Help {
+                    render_help(f, f.area());
+                }
+
                 // Status bar
-                let mode_indicator = if has_events {
+                let mode_indicator = if app.view_mode == ViewMode::Search {
+                    Span::styled("SEARCH MODE", Style::default().fg(CAUTION_AMBER))
+                } else if has_events {
                     Span::styled(
-                        "Mode: LIVE PROFILING",
+                        "● LIVE",
                         Style::default().fg(CRITICAL_RED).add_modifier(Modifier::BOLD),
                     )
                 } else {
                     Span::styled(
-                        "AWAITING EVENTS... (generate load on target)",
+                        "AWAITING EVENTS... (generate load)",
                         Style::default().fg(INFO_DIM),
                     )
                 };
 
                 let status_line = Line::from(vec![
                     Span::styled("[Q]", Style::default().fg(CAUTION_AMBER)),
-                    Span::raw(" Quit    "),
+                    Span::raw(" Quit  "),
+                    Span::styled("[↑↓]", Style::default().fg(CAUTION_AMBER)),
+                    Span::raw(" Scroll  "),
+                    Span::styled("[/]", Style::default().fg(CAUTION_AMBER)),
+                    Span::raw(" Search  "),
+                    Span::styled("[?]", Style::default().fg(CAUTION_AMBER)),
+                    Span::raw(" Help    "),
                     mode_indicator,
                 ]);
 
@@ -773,22 +1080,19 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
             last_update = std::time::Instant::now();
         }
 
-        // Handle keyboard input (non-blocking)
+        // Handle keyboard input
         if event::poll(Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
-                    if let KeyCode::Char('q' | 'Q') = key.code {
-                        should_quit = true;
-                    }
+                    app.handle_key(key.code);
                 }
             }
         }
 
-        if should_quit {
+        if app.should_quit {
             break;
         }
 
-        // Small sleep to avoid busy loop
         std::thread::sleep(Duration::from_millis(10));
     }
 

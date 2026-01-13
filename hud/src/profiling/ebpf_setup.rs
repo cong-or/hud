@@ -40,7 +40,8 @@ use crate::profiling::{identify_tokio_workers, online_cpus};
 /// # Errors
 /// Returns an error if the eBPF program binary cannot be loaded
 pub fn load_ebpf_program() -> Result<Ebpf> {
-    let bpf = Ebpf::load(include_bytes_aligned!("../../../target/bpfel-unknown-none/release/hud"))?;
+    let bpf =
+        Ebpf::load(include_bytes_aligned!("../../../target/bpfel-unknown-none/release/hud-ebpf"))?;
     Ok(bpf)
 }
 
