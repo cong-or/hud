@@ -693,18 +693,9 @@ fn render_help_overlay(f: &mut ratatui::Frame, area: Rect) {
             "  • bcrypt/argon2 — password hashing (use spawn_blocking)",
             STYLE_DIM,
         )),
-        Line::from(Span::styled(
-            "  • std::fs — sync file I/O (use tokio::fs)",
-            STYLE_DIM,
-        )),
-        Line::from(Span::styled(
-            "  • DNS lookup — std::net blocks (use tokio::net)",
-            STYLE_DIM,
-        )),
-        Line::from(Span::styled(
-            "  • compression — flate2/zstd (use spawn_blocking)",
-            STYLE_DIM,
-        )),
+        Line::from(Span::styled("  • std::fs — sync file I/O (use tokio::fs)", STYLE_DIM)),
+        Line::from(Span::styled("  • DNS lookup — std::net blocks (use tokio::net)", STYLE_DIM)),
+        Line::from(Span::styled("  • compression — flate2/zstd (use spawn_blocking)", STYLE_DIM)),
         Line::from(""),
         // Keys
         Line::from(Span::styled("  Keys", STYLE_HEADING)),
