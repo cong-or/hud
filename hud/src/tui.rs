@@ -66,6 +66,12 @@ use workers::WorkersPanel;
 
 pub use crate::trace_data::{LiveData, TraceData, TraceEvent};
 
+// Pre-computed styles to avoid repeated Style::default() calls
+const STYLE_HEADING: Style = Style::new().fg(HUD_GREEN).add_modifier(Modifier::BOLD);
+const STYLE_DIM: Style = Style::new().fg(INFO_DIM);
+const STYLE_KEY: Style = Style::new().fg(CAUTION_AMBER);
+const STYLE_TEXT: Style = Style::new().fg(ratatui::style::Color::White);
+
 /// View mode for the TUI
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum ViewMode {
@@ -258,10 +264,7 @@ impl App {
 
         let mut lines = vec![
             Line::from(""),
-            Line::from(vec![Span::styled(
-                "Select Workers to Filter",
-                Style::default().fg(HUD_GREEN).add_modifier(Modifier::BOLD),
-            )]),
+            Line::from(Span::styled("Select Workers to Filter", STYLE_HEADING)),
             Line::from("─".repeat(popup_area.width.saturating_sub(4) as usize)),
             Line::from(""),
         ];
@@ -315,80 +318,7 @@ impl App {
     /// Render help overlay
     #[allow(clippy::unused_self)]
     fn render_help(&self, f: &mut ratatui::Frame, area: Rect) {
-        let popup_area = {
-            let vertical = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Percentage(15),
-                    Constraint::Length(16),
-                    Constraint::Percentage(35),
-                ])
-                .split(area);
-
-            Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([
-                    Constraint::Percentage(25),
-                    Constraint::Percentage(50),
-                    Constraint::Percentage(25),
-                ])
-                .split(vertical[1])[1]
-        };
-
-        use ratatui::style::Color;
-        let text_color = Color::White;
-
-        let help_text = vec![
-            Line::from(""),
-            Line::from(vec![Span::styled(
-                "  Navigation",
-                Style::default().fg(HUD_GREEN).add_modifier(Modifier::BOLD),
-            )]),
-            Line::from(vec![
-                Span::styled("  ↑↓", Style::default().fg(CAUTION_AMBER)),
-                Span::styled("      Scroll hotspots", Style::default().fg(text_color)),
-            ]),
-            Line::from(vec![
-                Span::styled("  Enter", Style::default().fg(CAUTION_AMBER)),
-                Span::styled("   Drill-down to function", Style::default().fg(text_color)),
-            ]),
-            Line::from(vec![
-                Span::styled("  WASD", Style::default().fg(CAUTION_AMBER)),
-                Span::styled("    Zoom/pan timeline", Style::default().fg(text_color)),
-            ]),
-            Line::from(""),
-            Line::from(vec![Span::styled(
-                "  Filtering",
-                Style::default().fg(HUD_GREEN).add_modifier(Modifier::BOLD),
-            )]),
-            Line::from(vec![
-                Span::styled("  /", Style::default().fg(CAUTION_AMBER)),
-                Span::styled("       Search functions", Style::default().fg(text_color)),
-            ]),
-            Line::from(vec![
-                Span::styled("  F", Style::default().fg(CAUTION_AMBER)),
-                Span::styled("       Filter by worker", Style::default().fg(text_color)),
-            ]),
-            Line::from(vec![
-                Span::styled("  C", Style::default().fg(CAUTION_AMBER)),
-                Span::styled("       Clear filters", Style::default().fg(text_color)),
-            ]),
-            Line::from(""),
-            Line::from(vec![
-                Span::styled("  Q", Style::default().fg(CAUTION_AMBER)),
-                Span::styled("       Quit", Style::default().fg(text_color)),
-            ]),
-        ];
-
-        let help_widget = Paragraph::new(help_text).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" Keyboard Shortcuts ")
-                .style(Style::default().bg(Color::Black).fg(HUD_GREEN)),
-        );
-
-        f.render_widget(ratatui::widgets::Clear, popup_area);
-        f.render_widget(help_widget, popup_area);
+        render_help_overlay(f, area);
     }
 
     /// Render search input overlay
@@ -433,10 +363,7 @@ impl App {
         if let Some(hotspot) = self.hotspot_view.get_selected() {
             let mut lines = vec![
                 Line::from(""),
-                Line::from(vec![Span::styled(
-                    "FUNCTION DETAILS",
-                    Style::default().fg(HUD_GREEN).add_modifier(Modifier::BOLD),
-                )]),
+                Line::from(Span::styled("FUNCTION DETAILS", STYLE_HEADING)),
                 Line::from("─".repeat(area.width as usize - 4)),
                 Line::from(""),
             ];
@@ -563,27 +490,19 @@ impl App {
 
                 // Header - tactical display
                 let header = Paragraph::new(vec![Line::from(vec![
-                    Span::styled(
-                        "HUD",
-                        Style::default().fg(HUD_GREEN).add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(" | ", Style::default().fg(INFO_DIM)),
-                    Span::styled("REPLAY", Style::default().fg(CAUTION_AMBER)),
-                    Span::styled(" | ", Style::default().fg(INFO_DIM)),
-                    Span::styled(
-                        format!("{:.1}s", self.data.duration),
-                        Style::default().fg(HUD_GREEN),
-                    ),
-                    Span::styled(" | ", Style::default().fg(INFO_DIM)),
+                    Span::styled("HUD", STYLE_HEADING),
+                    Span::styled(" | ", STYLE_DIM),
+                    Span::styled("REPLAY", Style::new().fg(CAUTION_AMBER)),
+                    Span::styled(" | ", STYLE_DIM),
+                    Span::styled(format!("{:.1}s", self.data.duration), Style::new().fg(HUD_GREEN)),
+                    Span::styled(" | ", STYLE_DIM),
                     Span::styled(
                         format!("{} evts", self.data.events.len()),
-                        Style::default().fg(HUD_GREEN),
+                        Style::new().fg(HUD_GREEN),
                     ),
                 ])])
                 .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(Style::default().fg(HUD_GREEN)),
+                    Block::default().borders(Borders::ALL).border_style(Style::new().fg(HUD_GREEN)),
                 );
                 f.render_widget(header, outer_layout[0]);
 
@@ -726,67 +645,96 @@ impl App {
 
 // Standalone helper functions for overlays
 
-/// Render help overlay (standalone version)
-fn render_help(f: &mut ratatui::Frame, area: Rect) {
-    let popup_area = {
-        let vertical = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Percentage(15),
-                Constraint::Length(16),
-                Constraint::Percentage(35),
-            ])
-            .split(area);
-
-        Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Percentage(25),
-                Constraint::Percentage(50),
-                Constraint::Percentage(25),
-            ])
-            .split(vertical[1])[1]
-    };
-
-    use ratatui::style::Color;
-    let text_color = Color::White;
+/// Shared help overlay renderer (used by both live and replay modes)
+fn render_help_overlay(f: &mut ratatui::Frame, area: Rect) {
+    let popup_area = centered_popup(area, 80, 32);
 
     let help_text = vec![
         Line::from(""),
-        Line::from(vec![Span::styled(
-            "  Navigation",
-            Style::default().fg(HUD_GREEN).add_modifier(Modifier::BOLD),
-        )]),
+        // What is hud
+        Line::from(Span::styled("  What is hud?", STYLE_HEADING)),
+        Line::from(Span::styled(
+            "  hud detects blocking operations in async Tokio code. When a worker",
+            STYLE_DIM,
+        )),
+        Line::from(Span::styled(
+            "  thread stays on CPU too long (not yielding at .await), it captures a",
+            STYLE_DIM,
+        )),
+        Line::from(Span::styled("  stack trace showing what's blocking.", STYLE_DIM)),
+        Line::from(""),
+        // Hotspots
+        Line::from(Span::styled("  Hotspots", STYLE_HEADING)),
+        Line::from(Span::styled(
+            "  Functions ranked by time spent blocking the async runtime. High % means",
+            STYLE_DIM,
+        )),
+        Line::from(Span::styled(
+            "  this function is responsible for most blocking. Fix these first.",
+            STYLE_DIM,
+        )),
+        Line::from(""),
+        // Workers
+        Line::from(Span::styled("  Workers", STYLE_HEADING)),
+        Line::from(Span::styled(
+            "  Tokio worker thread utilization. High utilization = thread is busy.",
+            STYLE_DIM,
+        )),
+        Line::from(Span::styled(
+            "  If all workers are pegged, your app can't handle more async work.",
+            STYLE_DIM,
+        )),
+        Line::from(""),
+        // Keys
+        Line::from(Span::styled("  Keys", STYLE_HEADING)),
         Line::from(vec![
-            Span::styled("  ↑↓", Style::default().fg(CAUTION_AMBER)),
-            Span::styled("      Scroll hotspots", Style::default().fg(text_color)),
+            Span::styled("  ↑↓", STYLE_KEY),
+            Span::styled("  Navigate hotspots     ", STYLE_TEXT),
+            Span::styled("Enter", STYLE_KEY),
+            Span::styled("  View stack trace", STYLE_TEXT),
         ]),
         Line::from(vec![
-            Span::styled("  /", Style::default().fg(CAUTION_AMBER)),
-            Span::styled("       Search functions", Style::default().fg(text_color)),
+            Span::styled("  /", STYLE_KEY),
+            Span::styled("   Search functions     ", STYLE_TEXT),
+            Span::styled("C", STYLE_KEY),
+            Span::styled("      Clear filters", STYLE_TEXT),
         ]),
         Line::from(vec![
-            Span::styled("  C", Style::default().fg(CAUTION_AMBER)),
-            Span::styled("       Clear filters", Style::default().fg(text_color)),
+            Span::styled("  F", STYLE_KEY),
+            Span::styled("   Filter by worker     ", STYLE_TEXT),
+            Span::styled("Q", STYLE_KEY),
+            Span::styled("      Quit", STYLE_TEXT),
         ]),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("  Q", Style::default().fg(CAUTION_AMBER)),
-            Span::styled("       Quit", Style::default().fg(text_color)),
-        ]),
-        Line::from(""),
-        Line::from(vec![Span::styled("  Press any key to close", Style::default().fg(text_color))]),
+        Line::from(Span::styled("  Press any key to close", STYLE_DIM)),
     ];
 
     let help_widget = Paragraph::new(help_text).block(
         Block::default()
             .borders(Borders::ALL)
-            .title(" Keyboard Shortcuts ")
-            .style(Style::default().bg(Color::Black).fg(HUD_GREEN)),
+            .title(" Help ")
+            .style(Style::new().bg(ratatui::style::Color::Black).fg(HUD_GREEN)),
     );
 
     f.render_widget(ratatui::widgets::Clear, popup_area);
     f.render_widget(help_widget, popup_area);
+}
+
+/// Create a centered popup area with given width percentage and height in lines
+fn centered_popup(area: Rect, width_percent: u16, height_lines: u16) -> Rect {
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Fill(1), Constraint::Length(height_lines), Constraint::Fill(1)])
+        .split(area);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - width_percent) / 2),
+            Constraint::Percentage(width_percent),
+            Constraint::Percentage((100 - width_percent) / 2),
+        ])
+        .split(vertical[1])[1]
 }
 
 /// Render search input overlay (standalone version)
@@ -974,33 +922,30 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
                     0.0
                 };
                 let header = Paragraph::new(vec![Line::from(vec![
-                    Span::styled(
-                        "HUD",
-                        Style::default().fg(HUD_GREEN).add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(" | ", Style::default().fg(INFO_DIM)),
+                    Span::styled("HUD", STYLE_HEADING),
+                    Span::styled(" | ", STYLE_DIM),
                     Span::styled(
                         "[LIVE]",
-                        Style::default().fg(CRITICAL_RED).add_modifier(Modifier::BOLD),
+                        Style::new().fg(CRITICAL_RED).add_modifier(Modifier::BOLD),
                     ),
-                    Span::styled(" | ", Style::default().fg(INFO_DIM)),
-                    Span::styled(format!("PID:{pid_display}"), Style::default().fg(HUD_GREEN)),
-                    Span::styled(" | ", Style::default().fg(INFO_DIM)),
+                    Span::styled(" | ", STYLE_DIM),
+                    Span::styled(format!("PID:{pid_display}"), Style::new().fg(HUD_GREEN)),
+                    Span::styled(" | ", STYLE_DIM),
                     Span::styled(
                         format!("{:.1}s", trace_data.duration),
-                        Style::default().fg(HUD_GREEN),
+                        Style::new().fg(HUD_GREEN),
                     ),
-                    Span::styled(" | ", Style::default().fg(INFO_DIM)),
+                    Span::styled(" | ", STYLE_DIM),
                     Span::styled(
                         format!("{} evts", trace_data.events.len()),
-                        Style::default().fg(CAUTION_AMBER),
+                        Style::new().fg(CAUTION_AMBER),
                     ),
-                    Span::styled(format!(" ({rate:.0}/s)"), Style::default().fg(INFO_DIM)),
+                    Span::styled(format!(" ({rate:.0}/s)"), STYLE_DIM),
                 ])])
                 .block(
                     Block::default()
                         .borders(Borders::ALL)
-                        .border_style(Style::default().fg(CRITICAL_RED)),
+                        .border_style(Style::new().fg(CRITICAL_RED)),
                 );
                 f.render_widget(header, outer_layout[0]);
 
@@ -1036,7 +981,7 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
 
                 // Help overlay
                 if app.view_mode == ViewMode::Help {
-                    render_help(f, f.area());
+                    render_help_overlay(f, f.area());
                 }
 
                 // Status bar keybinds
