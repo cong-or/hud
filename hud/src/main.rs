@@ -1,9 +1,8 @@
 //! # hud - Main Entry Point
 //!
-//! Supports three operational modes:
-//! - **Live TUI** (`--pid <PID> --target <BINARY>`): Real-time profiling with interactive UI
-//! - **Headless** (`--headless`): Non-interactive profiling for CI/CD
-//! - **Replay** (`--replay <FILE>`): Analyze previously captured traces
+//! Supports two operational modes:
+//! - **Live TUI** (`--pid <PID>` or `hud <PROCESS>`): Real-time profiling with interactive UI
+//! - **Headless** (`--headless --export trace.json`): Non-interactive profiling for CI/CD
 //!
 //! See [Architecture docs](../docs/ARCHITECTURE.md) for detailed program flow.
 
@@ -35,8 +34,7 @@ use hud::profiling::{
     attach_task_id_uprobe, display_statistics, init_ebpf_logger, load_ebpf_program,
     print_perf_event_diagnostics, setup_scheduler_detection, EventProcessor, StackResolver,
 };
-use hud::trace_data::TraceData;
-use hud::tui::{self, App};
+use hud::tui;
 
 // Exit codes
 const EXIT_SUCCESS: i32 = 0;
@@ -120,14 +118,7 @@ async fn run() -> Result<()> {
 
     let quiet = args.quiet;
 
-    // Mode 1: Replay mode - load trace file and display in TUI
-    if let Some(trace_path) = args.replay {
-        let data = TraceData::from_file(&trace_path)?;
-        let app = App::new(data);
-        return app.run();
-    }
-
-    // Mode 2 & 3: Live profiling (with or without TUI)
+    // Live profiling (with or without TUI)
     // Resolve PID and target path from arguments
     let (pid, target_path) = resolve_pid_and_target(&args)?;
 

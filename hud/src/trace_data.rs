@@ -1,10 +1,8 @@
 //! Trace data models for TUI display
 //!
-//! This module contains the data structures for both live and replay modes
+//! This module contains the data structures for live profiling mode.
 
-use anyhow::Result;
 use std::collections::HashSet;
-use std::path::Path;
 use std::sync::Arc;
 
 /// Represents a single trace event
@@ -20,8 +18,8 @@ pub struct TraceEvent {
     pub line: Option<u32>,
 }
 
-/// Internal data model for profiler trace (immutable, loaded from file)
-/// Uses Arc for cheap cloning when converting from `LiveData`
+/// Internal data model for profiler trace.
+/// Uses Arc for cheap cloning when converting from `LiveData`.
 #[derive(Debug, Clone)]
 pub struct TraceData {
     pub events: Arc<Vec<TraceEvent>>,
@@ -97,51 +95,5 @@ impl LiveData {
             workers: Arc::clone(&self.workers),
             duration: self.duration,
         }
-    }
-}
-
-impl TraceData {
-    /// Parse trace.json into our internal representation
-    ///
-    /// # Errors
-    /// Returns an error if the file cannot be read or parsed as JSON
-    #[allow(clippy::cast_possible_truncation)]
-    pub fn from_file(path: impl AsRef<Path>) -> Result<Self> {
-        let content = std::fs::read_to_string(path)?;
-        let json: serde_json::Value = serde_json::from_str(&content)?;
-
-        // Parse trace events using functional pipeline: filter "B" events, then map to TraceEvent
-        let events: Vec<TraceEvent> = json["traceEvents"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter(|event| event["ph"].as_str() == Some("B"))
-            .map(|event| {
-                let name = event["name"].as_str().unwrap_or("unknown").to_string();
-                let worker_id = event["args"]["worker_id"].as_u64().unwrap_or(0) as u32;
-                let tid = event["tid"].as_u64().unwrap_or(0) as u32;
-                let timestamp = event["ts"].as_f64().unwrap_or(0.0) / 1_000_000.0; // Convert µs to seconds
-                let cpu = event["args"]["cpu_id"].as_u64().unwrap_or(0) as u32;
-                let detection_method = event["args"]["detection_method"].as_u64().map(|v| v as u32);
-                let file = event["args"]["file"].as_str().map(std::string::ToString::to_string);
-                let line = event["args"]["line"].as_u64().map(|v| v as u32);
-
-                TraceEvent { name, worker_id, tid, timestamp, cpu, detection_method, file, line }
-            })
-            .collect();
-
-        // Extract unique workers in single pass
-        let mut seen = HashSet::new();
-        let mut workers: Vec<u32> =
-            events.iter().filter_map(|e| seen.insert(e.worker_id).then_some(e.worker_id)).collect();
-        workers.sort_unstable();
-
-        let max_timestamp = events.iter().map(|e| e.timestamp).fold(0.0f64, f64::max);
-
-        Ok(TraceData {
-            events: Arc::new(events),
-            workers: Arc::new(workers),
-            duration: max_timestamp,
-        })
     }
 }

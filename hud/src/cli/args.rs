@@ -11,8 +11,7 @@ use std::path::PathBuf;
 EXAMPLES:
     sudo hud my-app                          Auto-detect PID and binary
     sudo hud --pid 1234                      Explicit PID, auto-detect binary
-    sudo hud --pid 1234 --target ./myapp     Explicit PID and binary
-    hud --replay trace.json                  View saved trace"
+    sudo hud --pid 1234 --target ./myapp     Explicit PID and binary"
 )]
 pub struct Args {
     /// Process name to profile (auto-detects PID and binary)
@@ -27,12 +26,8 @@ pub struct Args {
     #[arg(short, long)]
     pub target: Option<String>,
 
-    /// Replay a saved trace file
-    #[arg(long, value_name = "FILE", conflicts_with_all = &["pid", "target", "export"])]
-    pub replay: Option<PathBuf>,
-
-    /// Export trace to file
-    #[arg(long, value_name = "FILE", requires = "pid")]
+    /// Export trace to file (for external analysis)
+    #[arg(long, value_name = "FILE")]
     pub export: Option<PathBuf>,
 
     /// Stop after N seconds (0 = unlimited)

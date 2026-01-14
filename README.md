@@ -74,12 +74,6 @@ sudo hud my-app
 # Profile by PID
 sudo hud --pid 1234
 
-# Export trace for later analysis
-sudo hud my-app --export trace.json
-
-# Replay saved trace
-hud --replay trace.json
-
 # Headless mode (CI/scripting)
 sudo hud my-app --export trace.json --headless --duration 60
 ```
@@ -87,9 +81,9 @@ sudo hud my-app --export trace.json --headless --duration 60
 ## What You See
 
 Real-time TUI showing:
-- **Hotspots** — Functions ranked by CPU time
+- **Hotspots** — Functions ranked by blocking time
 - **Workers** — Per-thread utilization
-- **Stack traces** — Full call stack with file:line
+- **Source location** — File and line number for each hotspot
 
 <!-- TODO: Add screenshot -->
 
