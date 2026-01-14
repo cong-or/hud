@@ -24,17 +24,7 @@
 //! sudo hud demo-server
 //!
 //! # Terminal 3: Generate load
-//! # Hash endpoint (most obvious blocking)
-//! hey -n 100 -c 10 -m POST -d 'password123' http://localhost:3000/hash
-//!
-//! # Or hit all endpoints
-//! for i in {1..50}; do
-//!   curl -s -X POST http://localhost:3000/hash -d 'password' &
-//!   curl -s -X POST http://localhost:3000/parse -H "Content-Type: application/json" -d '{"items":["a","b","c"]}' &
-//!   curl -s -X POST http://localhost:3000/compress -d 'compress this data' &
-//!   curl -s http://localhost:3000/read &
-//! done
-//! wait
+//! ./hud/examples/load.sh
 //! ```
 
 use axum::{
@@ -274,11 +264,8 @@ async fn main() {
     println!("  GET  /dns       - DNS lookup");
     println!();
     println!("Generate load:");
-    println!("  curl -X POST http://localhost:3000/hash -d 'password123'");
-    println!("  curl -X POST http://localhost:3000/parse -H 'Content-Type: application/json' -d '{{\"items\":[\"a\",\"b\",\"c\"]}}'");
-    println!("  curl -X POST http://localhost:3000/compress -d 'compress this text'");
-    println!("  curl http://localhost:3000/read");
-    println!("  curl http://localhost:3000/dns");
+    println!("  ./hud/examples/load.sh        # continuous load");
+    println!("  ./hud/examples/load.sh 20     # 20 req/s");
 
     axum::serve(listener, app).await.unwrap();
 }
