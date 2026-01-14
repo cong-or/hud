@@ -35,7 +35,7 @@ cargo xtask build-ebpf --release && cargo build --release
 cargo xtask build-ebpf && cargo build
 
 # Run
-sudo -E ./target/release/hud --pid <PID> --target <BINARY>
+sudo ./target/release/hud my-app
 ```
 
 ## Testing
@@ -46,8 +46,8 @@ cargo test --workspace --exclude hud-ebpf
 
 # Integration test
 ./target/release/examples/demo-server &
-sudo -E ./target/release/hud --pid $(pgrep demo-server) --target ./target/release/examples/demo-server --duration 10
-kill $(pgrep demo-server)
+sudo ./target/release/hud demo-server --duration 10
+pkill demo-server
 ```
 
 ## Code Style

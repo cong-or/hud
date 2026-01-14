@@ -23,14 +23,14 @@ force-frame-pointers = true
 
 **Fix:** Run with sudo:
 ```bash
-sudo -E ./hud --pid <PID> --target <BINARY>
+sudo ./hud my-app
 ```
 
 ## No Events Captured
 
 1. **Not Tokio:** Check for workers: `ps -T -p <PID> | grep tokio-runtime-w`
 2. **Idle app:** Generate load
-3. **Wrong path:** Use `--target $(readlink -f /proc/<PID>/exe)`
+3. **Multiple matches:** Use explicit PID: `hud --pid <PID>`
 
 ## eBPF Build Failures
 
@@ -68,7 +68,7 @@ force-frame-pointers = true
 
 Garbled output. **Fix:** Use modern terminal or headless mode:
 ```bash
-sudo -E ./hud --pid <PID> --target <BINARY> --headless --export trace.json
+sudo ./hud my-app --headless --export trace.json
 ```
 
 ## Kernel Too Old
@@ -82,5 +82,5 @@ uname -r  # Check version
 ## Debug Mode
 
 ```bash
-RUST_LOG=debug sudo -E ./hud --pid <PID> --target <BINARY>
+RUST_LOG=debug sudo ./hud my-app
 ```

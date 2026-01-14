@@ -30,6 +30,7 @@ use std::time::{Duration, Instant};
 // Import modules
 use hud::cli::Args;
 use hud::preflight::{check_proc_access, check_process_exists, run_preflight_checks};
+use hud::process_lookup::{find_process_by_name, resolve_exe_path};
 use hud::profiling::{
     attach_task_id_uprobe, display_statistics, init_ebpf_logger, load_ebpf_program,
     print_perf_event_diagnostics, setup_scheduler_detection, EventProcessor, StackResolver,
@@ -66,6 +67,55 @@ fn exit_code_for(err: &anyhow::Error) -> i32 {
     }
 }
 
+/// Resolve PID and binary path from CLI arguments.
+///
+/// Supports three modes:
+/// - `hud my-app` - find process by name, auto-detect binary
+/// - `hud --pid 1234` - explicit PID, auto-detect binary from /proc
+/// - `hud --pid 1234 --target ./app` - explicit PID and binary
+fn resolve_pid_and_target(args: &Args) -> Result<(i32, String)> {
+    // Mode A: Process name provided - auto-detect both
+    if let Some(ref name) = args.process {
+        if args.pid.is_some() || args.target.is_some() {
+            anyhow::bail!(
+                "Cannot use PROCESS argument with --pid or --target.\n\n\
+                 Use either:\n  \
+                 hud my-app              (auto-detect)\n  \
+                 hud --pid 1234          (explicit PID)"
+            );
+        }
+        let info = find_process_by_name(name)?;
+        let target = info.exe_path.to_string_lossy().to_string();
+        return Ok((info.pid, target));
+    }
+
+    // Mode B: Explicit PID provided
+    if let Some(pid) = args.pid {
+        let target = if let Some(ref t) = args.target {
+            // Explicit target - resolve to absolute path
+            std::fs::canonicalize(t)
+                .with_context(|| format!("Failed to resolve path: {t}"))?
+                .to_string_lossy()
+                .to_string()
+        } else {
+            // Auto-detect from /proc/<pid>/exe
+            resolve_exe_path(pid)?
+                .to_string_lossy()
+                .to_string()
+        };
+        return Ok((pid, target));
+    }
+
+    // No PID or process name - show usage
+    anyhow::bail!(
+        "Missing required argument: PROCESS or --pid\n\n\
+         Usage:\n  \
+         hud my-app              Auto-detect PID and binary\n  \
+         hud --pid 1234          Explicit PID, auto-detect binary\n\n\
+         Run 'hud --help' for more options"
+    )
+}
+
 #[tokio::main]
 async fn run() -> Result<()> {
     let args = Args::parse();
@@ -80,19 +130,8 @@ async fn run() -> Result<()> {
     }
 
     // Mode 2 & 3: Live profiling (with or without TUI)
-    let pid = args.pid.ok_or_else(|| {
-        anyhow::anyhow!("Missing required argument: --pid\n\nRun 'hud --help' for usage")
-    })?;
-
-    let target_path = args.target.ok_or_else(|| {
-        anyhow::anyhow!("Missing required argument: --target\n\nRun 'hud --help' for usage")
-    })?;
-
-    // Convert to absolute path
-    let target_path = std::fs::canonicalize(&target_path)
-        .context(format!("Failed to resolve path: {target_path}"))?
-        .to_string_lossy()
-        .to_string();
+    // Resolve PID and target path from arguments
+    let (pid, target_path) = resolve_pid_and_target(&args)?;
 
     // Run pre-flight checks before anything else
     run_preflight_checks(&target_path, quiet)?;

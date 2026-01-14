@@ -9,7 +9,7 @@ A KISS Linux tool. One job: find what's blocking your Tokio runtime.
 Minimal-overhead eBPF profiling. Attach to any running process, no code changes needed.
 
 ```bash
-sudo ./hud --pid $(pgrep my-server) --target ./my-server
+sudo hud my-server
 ```
 
 ## The Problem
@@ -59,8 +59,8 @@ cargo xtask build-ebpf --release && cargo build --release --examples
 # Run demo server
 ./target/release/examples/demo-server &
 
-# Profile it (TUI appears)
-sudo -E ./target/release/hud --pid $(pgrep demo-server) --target ./target/release/examples/demo-server
+# Profile it
+sudo ./target/release/hud demo-server
 
 # Generate load (in another terminal)
 curl -X POST http://localhost:3000/process -H "Content-Type: application/json" -d '{"data":"test"}'
@@ -70,20 +70,23 @@ curl -X POST http://localhost:3000/process -H "Content-Type: application/json" -
 
 ## Usage
 
-All commands require root. Use `sudo -E` to preserve environment variables.
+All commands require root.
 
 ```bash
-# Live TUI
-hud --pid <PID> --target <BINARY>
+# Auto-detect PID and binary
+hud my-app
 
-# Export for later
-hud --pid <PID> --target <BINARY> --export trace.json
+# Explicit PID (binary auto-detected)
+hud --pid 1234
 
-# Replay
+# Export for later analysis
+hud my-app --export trace.json
+
+# Replay saved trace
 hud --replay trace.json
 
-# Headless
-hud --pid <PID> --target <BINARY> --export trace.json --headless --duration 60
+# Headless mode for scripting
+hud my-app --export trace.json --headless --duration 60
 ```
 
 ## What You See

@@ -32,6 +32,7 @@ pub mod cli;
 pub mod domain;
 pub mod export;
 pub mod preflight;
+pub mod process_lookup;
 pub mod profiling;
 pub mod symbolization;
 pub mod trace_data;

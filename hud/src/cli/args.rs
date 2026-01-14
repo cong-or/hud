@@ -9,16 +9,21 @@ use std::path::PathBuf;
     about = "Detect blocking operations in Tokio applications",
     after_help = "\
 EXAMPLES:
-    sudo hud --pid 1234 --target ./myapp     Live profiling with TUI
-    sudo hud -p 1234 -t ./myapp --headless --export trace.json
+    sudo hud my-app                          Auto-detect PID and binary
+    sudo hud --pid 1234                      Explicit PID, auto-detect binary
+    sudo hud --pid 1234 --target ./myapp     Explicit PID and binary
     hud --replay trace.json                  View saved trace"
 )]
 pub struct Args {
-    /// Process ID to profile
+    /// Process name to profile (auto-detects PID and binary)
+    #[arg(value_name = "PROCESS")]
+    pub process: Option<String>,
+
+    /// Process ID to profile (binary path auto-detected from /proc)
     #[arg(short, long)]
     pub pid: Option<i32>,
 
-    /// Path to binary (for symbol resolution)
+    /// Path to binary for symbol resolution (optional, auto-detected if omitted)
     #[arg(short, long)]
     pub target: Option<String>,
 
