@@ -1,6 +1,6 @@
 # hud
 
-[![CI](https://github.com/cong-or/runtime-scope/actions/workflows/ci.yml/badge.svg)](https://github.com/cong-or/runtime-scope/actions)
+[![CI](https://github.com/cong-or/hud/actions/workflows/ci.yml/badge.svg)](https://github.com/cong-or/hud/actions)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue)](LICENSE)
 [![Linux 5.8+](https://img.shields.io/badge/Linux-5.8%2B-yellow?logo=linux)](docs/ARCHITECTURE.md)
 
@@ -54,7 +54,7 @@ force-frame-pointers = true
 
 ```bash
 # Download latest release
-curl -L https://github.com/cong-or/runtime-scope/releases/latest/download/hud-linux-x86_64.tar.gz | tar xz
+curl -L https://github.com/cong-or/hud/releases/latest/download/hud-linux-x86_64.tar.gz | tar xz
 
 # Run
 sudo ./hud my-app
