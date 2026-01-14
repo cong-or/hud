@@ -52,11 +52,7 @@ pub fn find_process_by_name(name: &str) -> Result<ProcessInfo> {
         };
 
         if is_match(&command, &exe_path, name) {
-            matches.push(ProcessInfo {
-                pid,
-                exe_path,
-                command,
-            });
+            matches.push(ProcessInfo { pid, exe_path, command });
         }
     }
 
@@ -67,10 +63,8 @@ pub fn find_process_by_name(name: &str) -> Result<ProcessInfo> {
         ),
         1 => Ok(matches.remove(0)),
         _ => {
-            let list: Vec<String> = matches
-                .iter()
-                .map(|m| format!("  {} ({})", m.pid, m.command))
-                .collect();
+            let list: Vec<String> =
+                matches.iter().map(|m| format!("  {} ({})", m.pid, m.command)).collect();
             bail!(
                 "Multiple processes match '{name}':\n{}\n\n\
                  Specify PID explicitly: hud --pid <PID>",
@@ -99,15 +93,10 @@ fn extract_comm(stat: &str) -> Result<String> {
 
 /// Check if process matches the search pattern.
 fn is_match(command: &str, exe_path: &PathBuf, pattern: &str) -> bool {
-    let exe_basename = exe_path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("");
+    let exe_basename = exe_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
-    let pattern_basename = std::path::Path::new(pattern)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or(pattern);
+    let pattern_basename =
+        std::path::Path::new(pattern).file_name().and_then(|n| n.to_str()).unwrap_or(pattern);
 
     // Exact match on command or exe basename
     command == pattern_basename

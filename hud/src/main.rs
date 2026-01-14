@@ -99,9 +99,7 @@ fn resolve_pid_and_target(args: &Args) -> Result<(i32, String)> {
                 .to_string()
         } else {
             // Auto-detect from /proc/<pid>/exe
-            resolve_exe_path(pid)?
-                .to_string_lossy()
-                .to_string()
+            resolve_exe_path(pid)?.to_string_lossy().to_string()
         };
         return Ok((pid, target));
     }
