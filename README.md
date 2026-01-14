@@ -4,9 +4,7 @@
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue)](LICENSE)
 [![Linux 5.8+](https://img.shields.io/badge/Linux-5.8%2B-yellow?logo=linux)](docs/ARCHITECTURE.md)
 
-A KISS Linux tool. One job: find what's blocking your Tokio runtime.
-
-Minimal-overhead eBPF profiling. Attach to any running process, no code changes needed.
+Find what's blocking your Tokio runtime. Zero-instrumentation eBPF profiler.
 
 ```bash
 sudo hud my-server
@@ -39,12 +37,12 @@ hud attaches to any running Tokio process. No instrumentation, no unstable featu
 
 **System:**
 - Linux 5.8+ (eBPF ring buffer support)
-- x86_64 or aarch64 architecture
+- x86_64 architecture
 - Root or CAP_BPF privileges
 
-**Target binary must have debug symbols:**
+**Your application must have debug symbols:**
 ```toml
-# In your application's Cargo.toml
+# Cargo.toml
 [profile.release]
 debug = true
 force-frame-pointers = true
@@ -52,70 +50,74 @@ force-frame-pointers = true
 
 ## Install
 
-```bash
-# Download latest release
-curl -L https://github.com/cong-or/hud/releases/latest/download/hud-linux-x86_64.tar.gz | tar xz
+Download the binary:
 
-# Run
+```bash
+curl -L https://github.com/cong-or/hud/releases/latest/download/hud-linux-x86_64.tar.gz | tar xz
 sudo ./hud my-app
 ```
 
 Or build from source:
 
 ```bash
+git clone https://github.com/cong-or/hud.git && cd hud
 cargo xtask build-ebpf --release && cargo build --release
+sudo ./target/release/hud my-app
 ```
 
-## Quick Start
+## Usage
 
 ```bash
-# Build demo app
-cargo build --release --examples
+# Profile by process name
+sudo hud my-app
 
-# Run demo server
+# Profile by PID
+sudo hud --pid 1234
+
+# Export trace for later analysis
+sudo hud my-app --export trace.json
+
+# Replay saved trace
+hud --replay trace.json
+
+# Headless mode (CI/scripting)
+sudo hud my-app --export trace.json --headless --duration 60
+```
+
+## What You See
+
+Real-time TUI showing:
+- **Hotspots** — Functions ranked by CPU time
+- **Workers** — Per-thread utilization
+- **Stack traces** — Full call stack with file:line
+
+<!-- TODO: Add screenshot -->
+
+## Demo
+
+Try hud with the included demo server:
+
+```bash
+# Build and run demo server
+cargo build --release --examples
 ./target/release/examples/demo-server &
 
 # Profile it
 sudo ./target/release/hud demo-server
 
-# Generate load (in another terminal)
-curl -X POST http://localhost:3000/hash -d 'password123'
-
-# Press Q to quit hud
+# Generate load (another terminal)
+./hud/examples/load.sh
 ```
 
-## Usage
+The demo server has intentionally blocking endpoints (`/hash`, `/compress`, `/read`, `/dns`). You'll see `bcrypt` and `blowfish` hotspots from the `/hash` endpoint.
 
-All commands require root.
-
-```bash
-# Auto-detect PID and binary
-hud my-app
-
-# Explicit PID (binary auto-detected)
-hud --pid 1234
-
-# Export for later analysis
-hud my-app --export trace.json
-
-# Replay saved trace
-hud --replay trace.json
-
-# Headless mode for scripting
-hud my-app --export trace.json --headless --duration 60
-```
-
-## What You See
-
-Real-time TUI showing hotspots (functions by CPU time), worker utilization, and stack traces with file:line resolution.
-
-> **Want to contribute?** See [DEVELOPMENT.md](docs/DEVELOPMENT.md)
+Press `Q` to quit hud.
 
 ## Docs
 
-- [Architecture](docs/ARCHITECTURE.md) - Internals
-- [Troubleshooting](docs/TROUBLESHOOTING.md) - Common issues
-- [Development](docs/DEVELOPMENT.md) - Contributing
+- [Troubleshooting](docs/TROUBLESHOOTING.md) — Common issues
+- [Architecture](docs/ARCHITECTURE.md) — How it works internally
+- [Development](docs/DEVELOPMENT.md) — Contributing
 
 ## License
 
