@@ -2,7 +2,7 @@
 
 use anyhow::{bail, Context, Result};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Result of process lookup.
 #[derive(Debug)]
@@ -36,9 +36,8 @@ pub fn find_process_by_name(name: &str) -> Result<ProcessInfo> {
 
         // Skip kernel threads and inaccessible processes
         let exe_link = format!("/proc/{pid}/exe");
-        let exe_path = match fs::read_link(&exe_link) {
-            Ok(path) => path,
-            Err(_) => continue,
+        let Ok(exe_path) = fs::read_link(&exe_link) else {
+            continue;
         };
 
         // Get command name from stat
@@ -75,6 +74,9 @@ pub fn find_process_by_name(name: &str) -> Result<ProcessInfo> {
 }
 
 /// Resolve binary path from PID via `/proc/<pid>/exe`.
+///
+/// # Errors
+/// Returns error if the process doesn't exist or `/proc/<pid>/exe` is not readable.
 pub fn resolve_exe_path(pid: i32) -> Result<PathBuf> {
     let exe_link = format!("/proc/{pid}/exe");
     fs::read_link(&exe_link).with_context(|| format!("Cannot read {exe_link}"))
@@ -82,17 +84,17 @@ pub fn resolve_exe_path(pid: i32) -> Result<PathBuf> {
 
 /// Extract command name from `/proc/<pid>/stat`.
 /// Format: "pid (comm) state ..."
-fn extract_comm(stat: &str) -> Result<String> {
-    let start = stat.find('(').context("Invalid stat format")?;
-    let end = stat.rfind(')').context("Invalid stat format")?;
-    if start >= end {
+fn extract_comm(stat_line: &str) -> Result<String> {
+    let open = stat_line.find('(').context("Invalid stat format")?;
+    let close = stat_line.rfind(')').context("Invalid stat format")?;
+    if open >= close {
         bail!("Invalid stat format");
     }
-    Ok(stat[start + 1..end].to_string())
+    Ok(stat_line[open + 1..close].to_string())
 }
 
 /// Check if process matches the search pattern.
-fn is_match(command: &str, exe_path: &PathBuf, pattern: &str) -> bool {
+fn is_match(command: &str, exe_path: &Path, pattern: &str) -> bool {
     let exe_basename = exe_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
     let pattern_basename =
@@ -125,9 +127,9 @@ mod tests {
 
     #[test]
     fn test_is_match() {
-        let exe = PathBuf::from("/usr/bin/my-server");
-        assert!(is_match("my-server", &exe, "my-server"));
-        assert!(is_match("my-server", &exe, "server"));
-        assert!(!is_match("my-server", &exe, "other"));
+        let exe = Path::new("/usr/bin/my-server");
+        assert!(is_match("my-server", exe, "my-server"));
+        assert!(is_match("my-server", exe, "server"));
+        assert!(!is_match("my-server", exe, "other"));
     }
 }

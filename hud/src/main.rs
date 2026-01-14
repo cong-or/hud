@@ -244,16 +244,26 @@ async fn run() -> Result<()> {
     let duration_limit =
         if args.duration > 0 { Some(Duration::from_secs(args.duration)) } else { None };
 
+    // Pre-compute proc path for process liveness check
+    let proc_path = format!("/proc/{pid}");
+
+    // Track why we exited the loop
+    let mut exit_reason = "interrupted";
+
     // Main event processing loop
     loop {
         // Check for duration timeout
         if let Some(limit) = duration_limit {
             if profiling_start.elapsed() >= limit {
-                if !quiet {
-                    eprintln!("duration limit reached ({}s)", args.duration);
-                }
+                exit_reason = "duration limit reached";
                 break;
             }
+        }
+
+        // Check if target process still exists
+        if !std::path::Path::new(&proc_path).exists() {
+            exit_reason = "process exited";
+            break;
         }
 
         // Print status every 10 seconds if no events
@@ -294,6 +304,17 @@ async fn run() -> Result<()> {
                 break;
             }
         }
+    }
+
+    // Print summary (before TUI cleanup so it shows in headless mode)
+    if !quiet || args.headless {
+        let elapsed = profiling_start.elapsed();
+        eprintln!(
+            "\n{}: {:.1}s, {} events",
+            exit_reason,
+            elapsed.as_secs_f64(),
+            processor.event_count
+        );
     }
 
     // Wait for TUI to finish if it was running
