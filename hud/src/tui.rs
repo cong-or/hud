@@ -66,30 +66,55 @@ use workers::WorkersPanel;
 
 pub use crate::trace_data::{LiveData, TraceData, TraceEvent};
 
-// Pre-computed styles to avoid repeated Style::default() calls
+// =============================================================================
+// STYLE CONSTANTS
+// =============================================================================
+
+/// Pre-computed styles for consistent UI rendering (const fn for zero runtime cost)
 const STYLE_HEADING: Style = Style::new().fg(HUD_GREEN).add_modifier(Modifier::BOLD);
 const STYLE_LABEL: Style = Style::new().fg(CAUTION_AMBER).add_modifier(Modifier::BOLD);
 const STYLE_DIM: Style = Style::new().fg(INFO_DIM);
 const STYLE_KEY: Style = Style::new().fg(CAUTION_AMBER);
 const STYLE_TEXT: Style = Style::new().fg(ratatui::style::Color::White);
 
-/// View mode for the TUI
+// =============================================================================
+// VIEW MODES
+// =============================================================================
+
+/// Current view mode determines what's displayed and how keys are handled
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum ViewMode {
+    /// Main view: hotspot list, workers panel, timeline
     Analysis,
+    /// Detailed view of a single function (frozen snapshot)
     DrillDown,
+    /// Text input for filtering hotspots by name
     Search,
+    /// Checkbox list for filtering by worker thread
     WorkerFilter,
+    /// Help overlay with keyboard shortcuts
     Help,
 }
 
-/// Main TUI application state
+// =============================================================================
+// REPLAY MODE (App)
+// =============================================================================
+
+/// TUI application for **replay mode** - analyzing a saved trace.json file
+///
+/// Replay mode loads all events upfront and provides navigation through
+/// the historical data. Use `App::new()` to create and `App::run()` to start.
 pub struct App {
+    /// Loaded trace data (immutable after creation)
     data: TraceData,
+
+    // UI panels
     status_panel: StatusPanel,
     hotspot_view: HotspotView,
     workers_panel: WorkersPanel,
     timeline_view: TimelineView,
+
+    // UI state
     view_mode: ViewMode,
     search_query: String,
     selected_workers: Vec<u32>,
@@ -623,45 +648,61 @@ impl App {
     }
 }
 
-// Standalone helper functions for overlays
+// =============================================================================
+// OVERLAY RENDERERS
+// =============================================================================
+//
+// Standalone functions for rendering modal overlays (help, drilldown, search).
+// These are shared between live and replay modes to avoid code duplication.
 
-/// Shared help overlay renderer (used by both live and replay modes)
+/// Render the help overlay explaining hud concepts and keyboard shortcuts
 fn render_help_overlay(f: &mut ratatui::Frame, area: Rect) {
     let popup_area = centered_popup(area, 80, 32);
 
     let help_text = vec![
         Line::from(""),
-        // What is hud
-        Line::from(Span::styled("  What is hud?", STYLE_HEADING)),
+        // What you're looking at
+        Line::from(Span::styled("  What You're Looking At", STYLE_HEADING)),
         Line::from(Span::styled(
-            "  hud detects blocking operations in async Tokio code. When a worker",
+            "  hud shows functions blocking your Tokio async runtime. These are",
             STYLE_DIM,
         )),
         Line::from(Span::styled(
-            "  thread stays on CPU too long (not yielding at .await), it captures a",
-            STYLE_DIM,
-        )),
-        Line::from(Span::styled("  stack trace showing what's blocking.", STYLE_DIM)),
-        Line::from(""),
-        // Hotspots
-        Line::from(Span::styled("  Hotspots", STYLE_HEADING)),
-        Line::from(Span::styled(
-            "  Functions ranked by time spent blocking the async runtime. High % means",
-            STYLE_DIM,
-        )),
-        Line::from(Span::styled(
-            "  this function is responsible for most blocking. Fix these first.",
+            "  operations that don't yield at .await — they hog the thread.",
             STYLE_DIM,
         )),
         Line::from(""),
-        // Workers
-        Line::from(Span::styled("  Workers", STYLE_HEADING)),
+        // How to read it
+        Line::from(Span::styled("  How to Read It", STYLE_HEADING)),
+        Line::from(vec![
+            Span::styled("  Hotspots  ", STYLE_LABEL),
+            Span::styled("Functions ranked by blocking time. Fix the top ones.", STYLE_DIM),
+        ]),
+        Line::from(vec![
+            Span::styled("  Workers   ", STYLE_LABEL),
+            Span::styled("Thread utilization. All pegged = can't take more work.", STYLE_DIM),
+        ]),
+        Line::from(vec![
+            Span::styled("  Timeline  ", STYLE_LABEL),
+            Span::styled("When blocking happened. Spikes show bursts of blocking.", STYLE_DIM),
+        ]),
+        Line::from(""),
+        // Common culprits
+        Line::from(Span::styled("  Common Culprits", STYLE_HEADING)),
         Line::from(Span::styled(
-            "  Tokio worker thread utilization. High utilization = thread is busy.",
+            "  • bcrypt/argon2 — password hashing (use spawn_blocking)",
             STYLE_DIM,
         )),
         Line::from(Span::styled(
-            "  If all workers are pegged, your app can't handle more async work.",
+            "  • std::fs — sync file I/O (use tokio::fs)",
+            STYLE_DIM,
+        )),
+        Line::from(Span::styled(
+            "  • DNS lookup — std::net blocks (use tokio::net)",
+            STYLE_DIM,
+        )),
+        Line::from(Span::styled(
+            "  • compression — flate2/zstd (use spawn_blocking)",
             STYLE_DIM,
         )),
         Line::from(""),
@@ -669,21 +710,13 @@ fn render_help_overlay(f: &mut ratatui::Frame, area: Rect) {
         Line::from(Span::styled("  Keys", STYLE_HEADING)),
         Line::from(vec![
             Span::styled("  ↑↓", STYLE_KEY),
-            Span::styled("  Navigate hotspots     ", STYLE_TEXT),
+            Span::styled(" Select   ", STYLE_TEXT),
             Span::styled("Enter", STYLE_KEY),
-            Span::styled("  View stack trace", STYLE_TEXT),
-        ]),
-        Line::from(vec![
-            Span::styled("  /", STYLE_KEY),
-            Span::styled("   Search functions     ", STYLE_TEXT),
-            Span::styled("C", STYLE_KEY),
-            Span::styled("      Clear filters", STYLE_TEXT),
-        ]),
-        Line::from(vec![
-            Span::styled("  F", STYLE_KEY),
-            Span::styled("   Filter by worker     ", STYLE_TEXT),
+            Span::styled(" Inspect   ", STYLE_TEXT),
+            Span::styled("/", STYLE_KEY),
+            Span::styled(" Search   ", STYLE_TEXT),
             Span::styled("Q", STYLE_KEY),
-            Span::styled("      Quit", STYLE_TEXT),
+            Span::styled(" Quit", STYLE_TEXT),
         ]),
         Line::from(""),
         Line::from(Span::styled("  Press any key to close", STYLE_DIM)),
@@ -835,13 +868,30 @@ fn render_search_overlay(f: &mut ratatui::Frame, area: Rect, query: &str) {
     f.render_widget(search_widget, popup_area);
 }
 
-/// Live TUI state (similar to App but with dynamic data)
+// =============================================================================
+// LIVE MODE (LiveApp)
+// =============================================================================
+
+/// TUI application for **live mode** - real-time profiling of a running process
+///
+/// Live mode receives events from an eBPF channel and updates the display
+/// continuously. Key differences from replay mode:
+/// - Data grows over time (events stream in)
+/// - Hotspot rankings change dynamically
+/// - `DrillDown` view freezes a snapshot to prevent flickering
 struct LiveApp {
+    /// Accumulates events as they arrive from eBPF
     live_data: LiveData,
+    /// Hotspot view (rebuilt on each update, preserves selection)
     hotspot_view: Option<HotspotView>,
+
+    // UI state
     view_mode: ViewMode,
     search_query: String,
     should_quit: bool,
+
+    /// Frozen snapshot of hotspot for drilldown (prevents flicker during live updates)
+    frozen_hotspot: Option<crate::analysis::FunctionHotspot>,
 }
 
 impl LiveApp {
@@ -852,11 +902,14 @@ impl LiveApp {
             view_mode: ViewMode::Analysis,
             search_query: String::new(),
             should_quit: false,
+            frozen_hotspot: None,
         }
     }
 
+    /// Process keyboard input based on current view mode
     fn handle_key(&mut self, key: KeyCode) {
         match self.view_mode {
+            // Main analysis view - navigate hotspots, open overlays
             ViewMode::Analysis => match key {
                 KeyCode::Char('q' | 'Q') => self.should_quit = true,
                 KeyCode::Up => {
@@ -869,7 +922,14 @@ impl LiveApp {
                         hv.scroll_down();
                     }
                 }
-                KeyCode::Enter => self.view_mode = ViewMode::DrillDown,
+                KeyCode::Enter => {
+                    // Freeze the selected hotspot for drilldown view
+                    self.frozen_hotspot =
+                        self.hotspot_view.as_ref().and_then(|hv| hv.get_selected().cloned());
+                    if self.frozen_hotspot.is_some() {
+                        self.view_mode = ViewMode::DrillDown;
+                    }
+                }
                 KeyCode::Char('/') => {
                     self.view_mode = ViewMode::Search;
                     self.search_query.clear();
@@ -882,6 +942,7 @@ impl LiveApp {
                 KeyCode::Char('?') => self.view_mode = ViewMode::Help,
                 _ => {}
             },
+            // Search overlay - text input for filtering
             ViewMode::Search => match key {
                 KeyCode::Esc => {
                     self.view_mode = ViewMode::Analysis;
@@ -899,15 +960,24 @@ impl LiveApp {
                 KeyCode::Char(c) => self.search_query.push(c),
                 _ => {}
             },
+            // Help overlay - any key closes
             ViewMode::Help => self.view_mode = ViewMode::Analysis,
-            _ => {
+            // DrillDown overlay - ESC/Q closes and clears frozen snapshot
+            ViewMode::DrillDown => {
                 if matches!(key, KeyCode::Esc | KeyCode::Char('q' | 'Q')) {
                     self.view_mode = ViewMode::Analysis;
+                    self.frozen_hotspot = None;
                 }
             }
+            // Worker filter not implemented in live mode
+            ViewMode::WorkerFilter => {}
         }
     }
 
+    /// Rebuild hotspot view from trace data while preserving UI state
+    ///
+    /// This is called on each render cycle to reflect new events while
+    /// maintaining the user's current selection and any active filters.
     fn update_hotspot_view(&mut self, trace_data: &TraceData) {
         let (old_selected, old_filter) = self
             .hotspot_view
@@ -930,31 +1000,48 @@ impl LiveApp {
     }
 }
 
-/// Run TUI in live mode, receiving events from a channel
+// =============================================================================
+// LIVE MODE ENTRY POINT
+// =============================================================================
+
+/// Run TUI in live mode, receiving events from an eBPF channel
+///
+/// This is the main entry point for live profiling. It:
+/// 1. Sets up the terminal in raw mode
+/// 2. Receives events from the eBPF channel (non-blocking)
+/// 3. Updates the display at 10Hz (100ms intervals)
+/// 4. Handles keyboard input
+/// 5. Cleans up terminal on exit
 ///
 /// # Errors
 /// Returns an error if terminal setup or rendering fails
 pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> {
-    // Setup terminal
+    // -------------------------------------------------------------------------
+    // Terminal Setup
+    // -------------------------------------------------------------------------
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // Live app state
+    // -------------------------------------------------------------------------
+    // Application State
+    // -------------------------------------------------------------------------
     let mut app = LiveApp::new();
     let mut last_update = std::time::Instant::now();
-    const UPDATE_INTERVAL: Duration = Duration::from_millis(100);
+    const UPDATE_INTERVAL: Duration = Duration::from_millis(100); // 10 Hz refresh
 
-    // Main loop
+    // -------------------------------------------------------------------------
+    // Main Event Loop
+    // -------------------------------------------------------------------------
     loop {
-        // Process incoming events (non-blocking)
+        // Drain all pending events from eBPF (non-blocking)
         while let Ok(event) = event_rx.try_recv() {
             app.live_data.add_event(event);
         }
 
-        // Convert to TraceData for rendering
+        // Snapshot current data for rendering
         let trace_data = app.live_data.as_trace_data();
 
         // Redraw periodically
@@ -1047,12 +1134,10 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
                     render_help_overlay(f, f.area());
                 }
 
-                // DrillDown overlay
+                // DrillDown overlay (uses frozen snapshot)
                 if app.view_mode == ViewMode::DrillDown {
-                    if let Some(ref hv) = app.hotspot_view {
-                        if let Some(hotspot) = hv.get_selected() {
-                            render_drilldown_overlay(f, f.area(), hotspot);
-                        }
+                    if let Some(ref hotspot) = app.frozen_hotspot {
+                        render_drilldown_overlay(f, f.area(), hotspot);
                     }
                 }
 
