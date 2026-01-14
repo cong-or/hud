@@ -68,6 +68,7 @@ pub use crate::trace_data::{LiveData, TraceData, TraceEvent};
 
 // Pre-computed styles to avoid repeated Style::default() calls
 const STYLE_HEADING: Style = Style::new().fg(HUD_GREEN).add_modifier(Modifier::BOLD);
+const STYLE_LABEL: Style = Style::new().fg(CAUTION_AMBER).add_modifier(Modifier::BOLD);
 const STYLE_DIM: Style = Style::new().fg(INFO_DIM);
 const STYLE_KEY: Style = Style::new().fg(CAUTION_AMBER);
 const STYLE_TEXT: Style = Style::new().fg(ratatui::style::Color::White);
@@ -368,95 +369,74 @@ impl App {
                 Line::from(""),
             ];
 
+            // Severity color based on CPU percentage
+            let severity_color = match hotspot.percentage {
+                p if p > 40.0 => CRITICAL_RED,
+                p if p > 20.0 => CAUTION_AMBER,
+                _ => HUD_GREEN,
+            };
+
             // Function name (full, not truncated)
             lines.push(Line::from(vec![
-                Span::styled(
-                    "Name: ",
-                    Style::default().fg(CAUTION_AMBER).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(&hotspot.name, Style::default().fg(HUD_GREEN)),
+                Span::styled("Name: ", STYLE_LABEL),
+                Span::styled(hotspot.name.as_str(), Style::new().fg(HUD_GREEN)),
             ]));
             lines.push(Line::from(""));
 
             // CPU usage
             lines.push(Line::from(vec![
-                Span::styled(
-                    "CPU Usage: ",
-                    Style::default().fg(CAUTION_AMBER).add_modifier(Modifier::BOLD),
-                ),
+                Span::styled("CPU Usage: ", STYLE_LABEL),
                 Span::styled(
                     format!("{:.1}%", hotspot.percentage),
-                    Style::default().fg(if hotspot.percentage > 40.0 {
-                        CRITICAL_RED
-                    } else if hotspot.percentage > 20.0 {
-                        CAUTION_AMBER
-                    } else {
-                        HUD_GREEN
-                    }),
+                    Style::new().fg(severity_color),
                 ),
-                Span::raw(format!(" ({} samples)", hotspot.count)),
+                Span::styled(format!(" ({} samples)", hotspot.count), STYLE_DIM),
             ]));
             lines.push(Line::from(""));
 
             // Source location
-            if let Some(ref file) = hotspot.file {
-                lines.push(Line::from(vec![
-                    Span::styled(
-                        "Location: ",
-                        Style::default().fg(CAUTION_AMBER).add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        format!("{}:{}", file, hotspot.line.unwrap_or(0)),
-                        Style::default().fg(INFO_DIM),
-                    ),
-                ]));
-            } else {
-                lines.push(Line::from(vec![
-                    Span::styled(
-                        "Location: ",
-                        Style::default().fg(CAUTION_AMBER).add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled("(no debug symbols)", Style::default().fg(INFO_DIM)),
-                ]));
-            }
+            let location = hotspot.file.as_ref().map_or_else(
+                || "(no debug symbols)".into(),
+                |f| format!("{}:{}", f, hotspot.line.unwrap_or(0)),
+            );
+            lines.push(Line::from(vec![
+                Span::styled("Location: ", STYLE_LABEL),
+                Span::styled(location, STYLE_DIM),
+            ]));
             lines.push(Line::from(""));
 
             // Worker breakdown
-            lines.push(Line::from(vec![Span::styled(
-                "Worker Distribution:",
-                Style::default().fg(CAUTION_AMBER).add_modifier(Modifier::BOLD),
-            )]));
+            lines.push(Line::from(Span::styled("Worker Distribution:", STYLE_LABEL)));
             lines.push(Line::from(""));
 
             let mut worker_list: Vec<_> = hotspot.workers.iter().collect();
-            worker_list.sort_by(|a, b| b.1.cmp(a.1)); // Sort by count descending
+            worker_list.sort_unstable_by(|a, b| b.1.cmp(a.1));
 
-            for (worker_id, count) in worker_list {
-                let percentage = (*count as f64 / hotspot.count as f64) * 100.0;
-                let bar_width = 30;
-                let filled = ((percentage / 100.0) * bar_width as f64) as usize;
-                let empty = bar_width - filled;
-                let bar = format!("{}{}", "▓".repeat(filled), "░".repeat(empty));
+            for (&worker_id, &count) in &worker_list {
+                let percentage = (count as f64 / hotspot.count as f64) * 100.0;
+                const BAR_WIDTH: usize = 30;
+                let filled = ((percentage / 100.0) * BAR_WIDTH as f64) as usize;
+                let bar = format!("{}{}", "▓".repeat(filled), "░".repeat(BAR_WIDTH - filled));
 
                 lines.push(Line::from(vec![
                     Span::raw(format!("  Worker {worker_id:2}: ")),
-                    Span::styled(bar, Style::default().fg(HUD_GREEN)),
-                    Span::raw(format!(" {percentage:.0}% ({count} samples)")),
+                    Span::styled(bar, Style::new().fg(HUD_GREEN)),
+                    Span::styled(format!(" {percentage:.0}% ({count} samples)"), STYLE_DIM),
                 ]));
             }
 
             lines.push(Line::from(""));
             lines.push(Line::from("─".repeat(area.width as usize - 4)));
             lines.push(Line::from(vec![
-                Span::styled("[ESC]", Style::default().fg(CAUTION_AMBER)),
-                Span::raw(" Back to Analysis"),
+                Span::styled("[ESC]", STYLE_KEY),
+                Span::styled(" Back to Analysis", STYLE_DIM),
             ]));
 
             let paragraph = Paragraph::new(lines).block(
                 Block::default()
                     .borders(Borders::ALL)
                     .title("Function Detail View")
-                    .style(Style::default().bg(BACKGROUND)),
+                    .style(Style::new().bg(BACKGROUND)),
             );
 
             f.render_widget(paragraph, area);
@@ -737,6 +717,88 @@ fn centered_popup(area: Rect, width_percent: u16, height_lines: u16) -> Rect {
         .split(vertical[1])[1]
 }
 
+/// Render drilldown overlay for a selected hotspot (standalone version for live mode)
+fn render_drilldown_overlay(
+    f: &mut ratatui::Frame,
+    area: Rect,
+    hotspot: &crate::analysis::FunctionHotspot,
+) {
+    let popup_area = centered_popup(area, 70, 24);
+    let separator = "─".repeat(popup_area.width.saturating_sub(4) as usize);
+
+    // Severity color based on CPU percentage
+    let severity_color = match hotspot.percentage {
+        p if p > 40.0 => CRITICAL_RED,
+        p if p > 20.0 => CAUTION_AMBER,
+        _ => HUD_GREEN,
+    };
+
+    let mut lines = vec![
+        Line::from(""),
+        Line::from(Span::styled("FUNCTION DETAILS", STYLE_HEADING)),
+        Line::from(separator.as_str()),
+        Line::from(""),
+        // Function name
+        Line::from(vec![
+            Span::styled("Name: ", STYLE_LABEL),
+            Span::styled(hotspot.name.as_str(), Style::new().fg(HUD_GREEN)),
+        ]),
+        Line::from(""),
+        // CPU usage
+        Line::from(vec![
+            Span::styled("CPU: ", STYLE_LABEL),
+            Span::styled(format!("{:.1}%", hotspot.percentage), Style::new().fg(severity_color)),
+            Span::styled(format!(" ({} samples)", hotspot.count), STYLE_DIM),
+        ]),
+        Line::from(""),
+    ];
+
+    // Source location
+    let location = hotspot.file.as_ref().map_or_else(
+        || "(no debug symbols)".into(),
+        |f| format!("{}:{}", f, hotspot.line.unwrap_or(0)),
+    );
+    lines.push(Line::from(vec![
+        Span::styled("Location: ", STYLE_LABEL),
+        Span::styled(location, STYLE_DIM),
+    ]));
+    lines.push(Line::from(""));
+
+    // Worker breakdown
+    lines.push(Line::from(Span::styled("Worker Distribution:", STYLE_LABEL)));
+
+    let mut worker_list: Vec<_> = hotspot.workers.iter().collect();
+    worker_list.sort_unstable_by(|a, b| b.1.cmp(a.1));
+
+    const BAR_WIDTH: usize = 20;
+    for (&worker_id, &count) in worker_list.iter().take(6) {
+        let pct = (count as f64 / hotspot.count as f64) * 100.0;
+        let filled = ((pct / 100.0) * BAR_WIDTH as f64) as usize;
+        let bar = format!("{}{}", "▓".repeat(filled), "░".repeat(BAR_WIDTH - filled));
+        lines.push(Line::from(vec![
+            Span::raw(format!("  W{worker_id:2}: ")),
+            Span::styled(bar, Style::new().fg(HUD_GREEN)),
+            Span::styled(format!(" {pct:.0}%"), STYLE_DIM),
+        ]));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("ESC", STYLE_KEY),
+        Span::styled(" to close", STYLE_DIM),
+    ]));
+
+    let widget = Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Function Detail ")
+            .style(Style::new().bg(ratatui::style::Color::Black).fg(HUD_GREEN)),
+    );
+
+    f.render_widget(ratatui::widgets::Clear, popup_area);
+    f.render_widget(widget, popup_area);
+}
+
 /// Render search input overlay (standalone version)
 fn render_search_overlay(f: &mut ratatui::Frame, area: Rect, query: &str) {
     let popup_area = {
@@ -807,6 +869,7 @@ impl LiveApp {
                         hv.scroll_down();
                     }
                 }
+                KeyCode::Enter => self.view_mode = ViewMode::DrillDown,
                 KeyCode::Char('/') => {
                     self.view_mode = ViewMode::Search;
                     self.search_query.clear();
@@ -984,22 +1047,32 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
                     render_help_overlay(f, f.area());
                 }
 
+                // DrillDown overlay
+                if app.view_mode == ViewMode::DrillDown {
+                    if let Some(ref hv) = app.hotspot_view {
+                        if let Some(hotspot) = hv.get_selected() {
+                            render_drilldown_overlay(f, f.area(), hotspot);
+                        }
+                    }
+                }
+
                 // Status bar keybinds
-                let mode_indicator = if app.view_mode == ViewMode::Search {
-                    Span::styled("[Search]", Style::default().fg(CAUTION_AMBER))
-                } else if has_events {
-                    Span::styled("[Live]", Style::default().fg(CRITICAL_RED))
-                } else {
-                    Span::styled("[Waiting]", Style::default().fg(INFO_DIM))
+                let mode_indicator = match app.view_mode {
+                    ViewMode::Search => Span::styled("[Search]", Style::new().fg(CAUTION_AMBER)),
+                    ViewMode::DrillDown => Span::styled("[Detail]", Style::new().fg(CAUTION_AMBER)),
+                    _ if has_events => Span::styled("[Live]", Style::new().fg(CRITICAL_RED)),
+                    _ => Span::styled("[Waiting]", STYLE_DIM),
                 };
 
                 let status_line = Line::from(vec![
-                    Span::styled("Q", Style::default().fg(CAUTION_AMBER)),
-                    Span::styled(":Quit ", Style::default().fg(INFO_DIM)),
-                    Span::styled("/", Style::default().fg(CAUTION_AMBER)),
-                    Span::styled(":Search ", Style::default().fg(INFO_DIM)),
-                    Span::styled("?", Style::default().fg(CAUTION_AMBER)),
-                    Span::styled(":Help ", Style::default().fg(INFO_DIM)),
+                    Span::styled("Q", STYLE_KEY),
+                    Span::styled(":Quit ", STYLE_DIM),
+                    Span::styled("Enter", STYLE_KEY),
+                    Span::styled(":Detail ", STYLE_DIM),
+                    Span::styled("/", STYLE_KEY),
+                    Span::styled(":Search ", STYLE_DIM),
+                    Span::styled("?", STYLE_KEY),
+                    Span::styled(":Help ", STYLE_DIM),
                     mode_indicator,
                 ]);
 
