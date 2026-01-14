@@ -50,11 +50,27 @@ debug = true
 force-frame-pointers = true
 ```
 
+## Install
+
+```bash
+# Download latest release
+curl -L https://github.com/cong-or/runtime-scope/releases/latest/download/hud-linux-x86_64.tar.gz | tar xz
+
+# Run
+sudo ./hud my-app
+```
+
+Or build from source:
+
+```bash
+cargo xtask build-ebpf --release && cargo build --release
+```
+
 ## Quick Start
 
 ```bash
-# Build hud and demo app
-cargo xtask build-ebpf --release && cargo build --release --examples
+# Build demo app
+cargo build --release --examples
 
 # Run demo server
 ./target/release/examples/demo-server &
