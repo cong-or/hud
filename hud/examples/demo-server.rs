@@ -10,7 +10,7 @@
 //! | POST /hash | bcrypt in async | Password hashing |
 //! | POST /parse | Large JSON parse | API request handling |
 //! | POST /compress | Sync compression | Response compression |
-//! | GET /read | std::fs blocking | Config file loading |
+//! | GET /read | `std::fs` blocking | Config file loading |
 //! | GET /dns | Sync DNS lookup | Service discovery |
 //!
 //! ## Usage
@@ -158,7 +158,7 @@ struct ReadResponse {
     preview: String,
 }
 
-/// BAD: std::fs::File blocks the async runtime
+/// BAD: `std::fs::File` blocks the async runtime
 async fn read_file_bad() -> Json<ReadResponse> {
     // Read /proc/meminfo multiple times to simulate file operations
     let mut content = String::new();
@@ -172,7 +172,7 @@ async fn read_file_bad() -> Json<ReadResponse> {
     Json(ReadResponse { size: content.len(), preview: content.chars().take(100).collect() })
 }
 
-/// GOOD: Use tokio::fs for async file I/O
+/// GOOD: Use `tokio::fs` for async file I/O
 #[allow(dead_code)]
 async fn read_file_good() -> Json<ReadResponse> {
     let mut content = String::new();
@@ -194,7 +194,7 @@ struct DnsResponse {
     addresses: Vec<String>,
 }
 
-/// BAD: std::net::ToSocketAddrs blocks
+/// BAD: `std::net::ToSocketAddrs` blocks
 async fn dns_lookup_bad() -> Json<DnsResponse> {
     use std::net::ToSocketAddrs;
 
