@@ -79,7 +79,7 @@ cargo build --release --examples
 sudo ./target/release/hud demo-server
 
 # Generate load (in another terminal)
-curl -X POST http://localhost:3000/process -H "Content-Type: application/json" -d '{"data":"test"}'
+curl -X POST http://localhost:3000/hash -d 'password123'
 
 # Press Q to quit hud
 ```

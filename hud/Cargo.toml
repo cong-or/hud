@@ -36,3 +36,5 @@ crossbeam-channel = "0.5"
 [dev-dependencies]
 tempfile = "3.8"
 axum = "0.7"
+bcrypt = "0.15"
+flate2 = "1.0"
