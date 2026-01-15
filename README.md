@@ -79,15 +79,6 @@ sudo hud --pid 1234
 sudo hud my-app --export trace.json --headless --duration 60
 ```
 
-## What You See
-
-Real-time TUI showing:
-- **Hotspots** — Functions ranked by blocking time
-- **Workers** — Per-thread utilization
-- **Source location** — File and line number for each hotspot
-
-<!-- TODO: Add screenshot -->
-
 ## Demo
 
 Try hud with the included demo server:
