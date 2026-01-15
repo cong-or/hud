@@ -89,7 +89,7 @@ cargo build --release --examples
 ./target/release/examples/demo-server &
 
 # Profile it
-sudo ./target/release/hud demo-server
+sudo hud demo-server
 
 # Generate load (another terminal)
 ./hud/examples/load.sh
