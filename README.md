@@ -37,11 +37,11 @@ hud attaches to any running Tokio process. No instrumentation, no unstable featu
 ## Requirements
 
 **System:**
-- Linux 5.8+ (eBPF ring buffer support)
+- Linux 5.8+
 - x86_64 architecture
-- Root or CAP_BPF privileges
+- Root privileges
 
-**Your application must have debug symbols:**
+**Your application needs debug symbols** (so hud can show function names):
 ```toml
 # Cargo.toml
 [profile.release]

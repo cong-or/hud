@@ -5,7 +5,7 @@
 **System:**
 - Linux 5.8+
 - x86_64 or aarch64
-- Root/CAP_BPF for running
+- Root privileges for running
 
 **Toolchains:**
 ```bash

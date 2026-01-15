@@ -77,5 +77,5 @@ TUI runs in separate thread with non-blocking crossbeam channel. Neither thread 
 - Linux 5.8+ only (eBPF)
 - Tokio only (thread naming)
 - Debug symbols required (DWARF)
-- Root/CAP_BPF required
+- Root privileges required
 - x86_64/aarch64 only
