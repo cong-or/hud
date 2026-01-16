@@ -28,6 +28,7 @@
 
 // Expose modules for testing
 pub mod analysis;
+pub mod classification;
 pub mod cli;
 pub mod domain;
 pub mod export;

@@ -84,18 +84,21 @@ sudo hud my-app --export trace.json --headless --duration 60
 Try hud with the included demo server:
 
 ```bash
-# Build and run demo server
-cargo build --release --examples
-./target/release/examples/demo-server &
+# Build demo server (debug build preserves function names in stack traces)
+cargo build --example demo-server
+./target/debug/examples/demo-server &
 
 # Profile it
-sudo hud demo-server
+sudo ./target/release/hud --pid $(pgrep demo-server) \
+    --target ./target/debug/examples/demo-server
 
 # Generate load (another terminal)
 ./hud/examples/load.sh
 ```
 
 The demo server has intentionally blocking endpoints (`/hash`, `/compress`, `/read`, `/dns`). You'll see `bcrypt` and `blowfish` hotspots from the `/hash` endpoint.
+
+> **Tip**: Use debug builds of your target app for best results. Release builds inline functions aggressively, which can hide your code in stack traces. In the drilldown view, your code is highlighted in **bold green** with a **◄** marker.
 
 Press `Q` to quit hud.
 

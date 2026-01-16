@@ -16,16 +16,23 @@
 //! ## Usage
 //!
 //! ```bash
-//! # Terminal 1: Run server
-//! cargo build --release --examples
-//! ./target/release/examples/demo-server
+//! # Terminal 1: Build and run server (use debug build for better stack traces)
+//! cargo build --example demo-server
+//! ./target/debug/examples/demo-server
 //!
 //! # Terminal 2: Profile with hud
-//! sudo hud demo-server
+//! sudo ./target/release/hud --pid $(pgrep demo-server) \
+//!     --target ./target/debug/examples/demo-server
 //!
 //! # Terminal 3: Generate load
 //! ./hud/examples/load.sh
 //! ```
+//!
+//! ## Why Debug Build?
+//!
+//! Release builds aggressively inline functions, which can hide your code in
+//! stack traces. Debug builds preserve function boundaries, so hud can show
+//! exactly where in YOUR code the blocking call originates (marked with ◄).
 
 use axum::{
     body::Bytes,

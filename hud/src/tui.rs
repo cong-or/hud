@@ -190,6 +190,10 @@ fn render_help_overlay(f: &mut ratatui::Frame, area: Rect) {
             Span::styled("Q", STYLE_KEY),
             Span::styled(" Quit", STYLE_TEXT),
         ]),
+        Line::from(vec![
+            Span::styled("  Y", STYLE_KEY),
+            Span::styled(" Yank (in drilldown) — copy call stack to clipboard", STYLE_DIM),
+        ]),
         Line::from(""),
         Line::from(Span::styled("  Press any key to close", STYLE_DIM)),
     ];
@@ -249,15 +253,18 @@ fn render_drilldown_overlay(
     hotspot: &crate::analysis::FunctionHotspot,
 ) {
     // Calculate popup height based on content
+    // MAX_FRAMES is 12 but smart selection may show more if there's user code deep in the stack
+    const DISPLAY_MAX_FRAMES: usize = 15;
     let has_call_stack = !hotspot.call_stacks.is_empty();
     let call_stack_lines = if has_call_stack {
-        hotspot.call_stacks.first().map_or(0, |s| s.len().min(5)) + 2 // header + frames + spacing
+        hotspot.call_stacks.first().map_or(0, |s| s.len().min(DISPLAY_MAX_FRAMES)) + 3
+    // header + frames + "N of M" + spacing
     } else {
         0
     };
     let worker_lines = hotspot.workers.len().min(4) + 1;
     let base_height = 16; // Header + stats + footer
-    let popup_height = (base_height + call_stack_lines + worker_lines).min(35) as u16;
+    let popup_height = (base_height + call_stack_lines + worker_lines).min(45) as u16;
 
     let popup_area = centered_popup(area, 65, popup_height);
     let inner_width = popup_area.width.saturating_sub(4) as usize;
@@ -336,16 +343,23 @@ fn render_drilldown_overlay(
     ];
 
     // Call trace section - inverted to show: your_code → library → blocking_fn
-    const MAX_FRAMES: usize = 8;
+    const MAX_FRAMES: usize = 12;
 
     if let Some(call_stack) = hotspot.call_stacks.first() {
         lines.push(Line::from(Span::styled("  CALL TRACE", STYLE_DIM)));
 
         // Reverse stack: show caller (your code) first, blocking function last
-        let frames: Vec<_> = call_stack.iter().rev().take(MAX_FRAMES).collect();
-        let last_idx = frames.len().saturating_sub(1);
+        let all_frames: Vec<_> = call_stack.iter().rev().collect();
 
-        for (i, frame) in frames.into_iter().enumerate() {
+        // Smart frame selection: always include user frames + context
+        let frames: Vec<_> = select_frames_for_display(&all_frames, MAX_FRAMES);
+        let frames_shown = frames.len();
+        let last_idx = frames_shown.saturating_sub(1);
+
+        // Find the index of the first (topmost) user code frame for special highlighting
+        let first_user_frame_idx = frames.iter().position(|f| f.is_user_code);
+
+        for (i, frame) in frames.iter().enumerate() {
             let arrow = if i == last_idx { "└→" } else { "├→" };
 
             // Truncate long function names
@@ -356,8 +370,18 @@ fn render_drilldown_overlay(
                 frame.function.clone()
             };
 
+            // Determine if this is the topmost user frame (entry point)
+            let is_entry_point = first_user_frame_idx == Some(i);
+
             // User code in green, library code dimmed
-            let style = if frame.is_user_code { Style::new().fg(HUD_GREEN) } else { STYLE_DIM };
+            // Entry point (first user frame) gets bold + marker
+            let style = if is_entry_point {
+                Style::new().fg(HUD_GREEN).add_modifier(Modifier::BOLD)
+            } else if frame.is_user_code {
+                Style::new().fg(HUD_GREEN)
+            } else {
+                STYLE_DIM
+            };
 
             // Format location as "file.rs:42" or empty string
             let location = frame.file.as_ref().map_or(String::new(), |path| {
@@ -366,16 +390,21 @@ fn render_drilldown_overlay(
                 frame.line.map_or(filename.to_string(), |ln| format!("{filename}:{ln}"))
             });
 
+            // Add marker for entry point
+            let marker = if is_entry_point { " ◄" } else { "" };
+
             lines.push(Line::from(vec![
                 Span::styled(format!("    {arrow} "), STYLE_DIM),
                 Span::styled(func_display, style),
                 Span::styled(format!("  {location}"), STYLE_DIM),
+                Span::styled(marker, Style::new().fg(HUD_GREEN).add_modifier(Modifier::BOLD)),
             ]));
         }
 
-        if call_stack.len() > MAX_FRAMES {
+        let total = call_stack.len();
+        if total > frames_shown {
             lines.push(Line::from(Span::styled(
-                format!("       ... +{} more frames", call_stack.len() - MAX_FRAMES),
+                format!("       ... ({frames_shown} of {total} frames shown)"),
                 STYLE_DIM,
             )));
         }
@@ -410,7 +439,9 @@ fn render_drilldown_overlay(
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
         Span::styled("  [ESC]", STYLE_KEY),
-        Span::styled(" DISENGAGE", STYLE_DIM),
+        Span::styled(" Close  ", STYLE_DIM),
+        Span::styled("[Y]", STYLE_KEY),
+        Span::styled(" Yank to clipboard", STYLE_DIM),
     ]));
 
     let widget = Paragraph::new(lines).block(
@@ -422,6 +453,139 @@ fn render_drilldown_overlay(
 
     f.render_widget(ratatui::widgets::Clear, popup_area);
     f.render_widget(widget, popup_area);
+}
+
+/// Select frames for display, prioritizing user code visibility.
+///
+/// When a call stack is very deep (common with async runtimes), we can't show
+/// all frames. This function selects the most relevant frames:
+///
+/// 1. All user code frames (the primary goal)
+/// 2. All frames from last user frame to blocking function (the call path)
+/// 3. Fill remaining slots from the beginning (runtime entry context)
+///
+/// This ensures users always see their code and how it leads to the blocking call.
+fn select_frames_for_display<'a>(
+    frames: &[&'a crate::trace_data::StackFrame],
+    max_frames: usize,
+) -> Vec<&'a crate::trace_data::StackFrame> {
+    // Fast path: if we can show everything, do so
+    if frames.len() <= max_frames {
+        return frames.to_vec();
+    }
+
+    // Find user frame indices
+    let user_indices: Vec<usize> =
+        frames.iter().enumerate().filter_map(|(i, f)| f.is_user_code.then_some(i)).collect();
+
+    // No user frames: show beginning + end of stack
+    if user_indices.is_empty() {
+        let half = max_frames / 2;
+        let tail_start = frames.len().saturating_sub(max_frames - half);
+        return frames.iter().take(half).chain(frames.iter().skip(tail_start)).copied().collect();
+    }
+
+    // Use BTreeSet for automatic sorting and deduplication
+    let mut selected: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
+
+    // Priority 1: All user frames
+    selected.extend(user_indices.iter().copied());
+
+    // Priority 2: Path from last user frame to blocking function
+    let last_user_idx = user_indices.last().copied().unwrap_or(0);
+    selected.extend(last_user_idx..frames.len());
+
+    // Priority 3: Fill from start until we hit max_frames
+    for i in 0..frames.len() {
+        if selected.len() >= max_frames {
+            break;
+        }
+        selected.insert(i);
+    }
+
+    // Convert indices to frame references (BTreeSet keeps them sorted)
+    selected.into_iter().map(|i| frames[i]).collect()
+}
+
+/// Format a hotspot's call trace as plain text for clipboard/debugging.
+fn format_hotspot_for_yank(hotspot: &crate::analysis::FunctionHotspot) -> String {
+    use crate::classification::FrameOrigin;
+    use std::fmt::Write;
+
+    let mut out = String::with_capacity(2048);
+
+    // Header
+    writeln!(out, "=== HOTSPOT: {} ===", hotspot.name).ok();
+    writeln!(out, "CPU: {:.1}%", hotspot.percentage).ok();
+    writeln!(out, "Samples: {}", hotspot.count).ok();
+
+    if let Some(ref file) = hotspot.file {
+        match hotspot.line {
+            Some(ln) => writeln!(out, "Location: {file}:{ln}").ok(),
+            None => writeln!(out, "Location: {file}").ok(),
+        };
+    }
+
+    // Call trace
+    writeln!(out).ok();
+    writeln!(out, "CALL TRACE (caller → callee):").ok();
+
+    if let Some(call_stack) = hotspot.call_stacks.first() {
+        let last_idx = call_stack.len().saturating_sub(1);
+
+        for (i, frame) in call_stack.iter().rev().enumerate() {
+            let origin_tag = match frame.origin {
+                FrameOrigin::UserCode => "[USER]",
+                FrameOrigin::StdLib => "[STD]",
+                FrameOrigin::RuntimeLib => "[RUNTIME]",
+                FrameOrigin::ThirdParty => "[3RDPARTY]",
+                FrameOrigin::Unknown => "[???]",
+            };
+
+            let location = format_frame_location(frame);
+            let arrow = if i == last_idx { "└→" } else { "├→" };
+
+            writeln!(out, "  {arrow} {origin_tag:<12} {}  {location}", frame.function).ok();
+        }
+    } else {
+        writeln!(out, "  (no call stack captured)").ok();
+    }
+
+    // Worker distribution
+    if !hotspot.workers.is_empty() {
+        writeln!(out).ok();
+        writeln!(out, "WORKERS:").ok();
+
+        let mut worker_list: Vec<_> = hotspot.workers.iter().collect();
+        worker_list.sort_unstable_by(|a, b| b.1.cmp(a.1));
+
+        for (&worker_id, &count) in worker_list.iter().take(4) {
+            let pct = (count as f64 / hotspot.count as f64) * 100.0;
+            writeln!(out, "  W{worker_id}: {pct:.0}% ({count} samples)").ok();
+        }
+    }
+
+    out
+}
+
+/// Format a frame's source location as "filename:line" or just "filename".
+fn format_frame_location(frame: &crate::trace_data::StackFrame) -> String {
+    frame.file.as_ref().map_or(String::new(), |path| {
+        let filename =
+            std::path::Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or(path);
+        match frame.line {
+            Some(ln) => format!("{filename}:{ln}"),
+            None => filename.to_string(),
+        }
+    })
+}
+
+/// Copy hotspot info to system clipboard.
+fn yank_hotspot_to_clipboard(hotspot: &crate::analysis::FunctionHotspot) -> Result<()> {
+    let text = format_hotspot_for_yank(hotspot);
+    let mut clipboard = arboard::Clipboard::new()?;
+    clipboard.set_text(&text)?;
+    Ok(())
 }
 
 /// Render search input overlay (standalone version)
@@ -557,13 +721,21 @@ impl LiveApp {
             },
             // Help overlay - any key closes
             ViewMode::Help => self.view_mode = ViewMode::Analysis,
-            // DrillDown overlay - ESC/Q closes and clears frozen snapshot
-            ViewMode::DrillDown => {
-                if matches!(key, KeyCode::Esc | KeyCode::Char('q' | 'Q')) {
+            // DrillDown overlay - ESC/Q closes, Y yanks to clipboard
+            ViewMode::DrillDown => match key {
+                KeyCode::Esc | KeyCode::Char('q' | 'Q') => {
                     self.view_mode = ViewMode::Analysis;
                     self.frozen_hotspot = None;
                 }
-            }
+                KeyCode::Char('y' | 'Y') => {
+                    if let Some(ref hotspot) = self.frozen_hotspot {
+                        if let Err(e) = yank_hotspot_to_clipboard(hotspot) {
+                            log::warn!("Failed to copy to clipboard: {e}");
+                        }
+                    }
+                }
+                _ => {}
+            },
         }
     }
 
@@ -751,25 +923,41 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
                     }
                 }
 
-                // Status bar keybinds
-                let mode_indicator = match app.view_mode {
-                    ViewMode::Search => Span::styled("[Search]", Style::new().fg(CAUTION_AMBER)),
-                    ViewMode::DrillDown => Span::styled("[Detail]", Style::new().fg(CAUTION_AMBER)),
-                    _ if has_events => Span::styled("[Live]", Style::new().fg(CRITICAL_RED)),
-                    _ => Span::styled("[Waiting]", STYLE_DIM),
+                // Status bar keybinds - show context-appropriate keys
+                let status_line = match app.view_mode {
+                    ViewMode::DrillDown => Line::from(vec![
+                        Span::styled("ESC", STYLE_KEY),
+                        Span::styled(":Close ", STYLE_DIM),
+                        Span::styled("Y", STYLE_KEY),
+                        Span::styled(":Yank ", STYLE_DIM),
+                        Span::styled("[Detail]", Style::new().fg(CAUTION_AMBER)),
+                    ]),
+                    ViewMode::Search => Line::from(vec![
+                        Span::styled("ESC", STYLE_KEY),
+                        Span::styled(":Cancel ", STYLE_DIM),
+                        Span::styled("Enter", STYLE_KEY),
+                        Span::styled(":Apply ", STYLE_DIM),
+                        Span::styled("[Search]", Style::new().fg(CAUTION_AMBER)),
+                    ]),
+                    _ => {
+                        let mode = if has_events {
+                            Span::styled("[Live]", Style::new().fg(CRITICAL_RED))
+                        } else {
+                            Span::styled("[Waiting]", STYLE_DIM)
+                        };
+                        Line::from(vec![
+                            Span::styled("Q", STYLE_KEY),
+                            Span::styled(":Quit ", STYLE_DIM),
+                            Span::styled("Enter", STYLE_KEY),
+                            Span::styled(":Detail ", STYLE_DIM),
+                            Span::styled("/", STYLE_KEY),
+                            Span::styled(":Search ", STYLE_DIM),
+                            Span::styled("?", STYLE_KEY),
+                            Span::styled(":Help ", STYLE_DIM),
+                            mode,
+                        ])
+                    }
                 };
-
-                let status_line = Line::from(vec![
-                    Span::styled("Q", STYLE_KEY),
-                    Span::styled(":Quit ", STYLE_DIM),
-                    Span::styled("Enter", STYLE_KEY),
-                    Span::styled(":Detail ", STYLE_DIM),
-                    Span::styled("/", STYLE_KEY),
-                    Span::styled(":Search ", STYLE_DIM),
-                    Span::styled("?", STYLE_KEY),
-                    Span::styled(":Help ", STYLE_DIM),
-                    mode_indicator,
-                ]);
 
                 let status = Paragraph::new(vec![status_line]).block(
                     Block::default()

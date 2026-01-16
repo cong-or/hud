@@ -25,6 +25,7 @@ use std::sync::Arc;
 use super::{
     display_execution_event, display_scheduler_detected, DetectionStats, MemoryRange, StackResolver,
 };
+use crate::classification::classify_frame;
 use crate::domain::StackId;
 use crate::export::TraceEventExporter;
 use crate::symbolization::Symbolizer;
@@ -242,28 +243,39 @@ impl<'a> EventProcessor<'a> {
 
                 if let Some(frame) = resolved.frames.first() {
                     // Successfully resolved - use DWARF info
+                    let file_str = frame.location.as_ref().and_then(|loc| loc.file.clone());
+                    let origin = classify_frame(
+                        &frame.function,
+                        file_str.as_deref(),
+                        true, // in_executable
+                    );
                     resolved_frames.push(StackFrame {
                         function: frame.function.clone(),
-                        file: frame.location.as_ref().and_then(|loc| loc.file.clone()),
+                        file: file_str,
                         line: frame.location.as_ref().and_then(|loc| loc.line),
-                        is_user_code: true,
+                        origin,
+                        is_user_code: origin.is_user_code(),
                     });
                 } else {
                     // DWARF lookup failed - show raw address (stripped binary?)
+                    let origin = crate::classification::FrameOrigin::Unknown;
                     resolved_frames.push(StackFrame {
                         function: format!("0x{addr:x}"),
                         file: None,
                         line: None,
-                        is_user_code: true,
+                        origin,
+                        is_user_code: origin.is_user_code(),
                     });
                 }
             } else {
                 // Library code - can't symbolize without library debug info
                 // Just show a placeholder with the address
+                let origin = crate::classification::FrameOrigin::Unknown;
                 resolved_frames.push(StackFrame {
                     function: format!("<library> 0x{addr:x}"),
                     file: None,
                     line: None,
+                    origin,
                     is_user_code: false,
                 });
             }

@@ -28,6 +28,8 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use crate::classification::FrameOrigin;
+
 // =============================================================================
 // STACK FRAME AND CACHE
 // =============================================================================
@@ -35,7 +37,7 @@ use std::sync::Arc;
 /// A single frame in a resolved call stack.
 ///
 /// Represents one function call in the stack trace, with optional source location.
-/// The `is_user_code` flag distinguishes application code from library/system code,
+/// The `origin` field classifies the frame as user code vs library/runtime code,
 /// allowing the UI to highlight user code more prominently.
 #[derive(Debug, Clone)]
 pub struct StackFrame {
@@ -48,8 +50,12 @@ pub struct StackFrame {
     /// Line number in source file, if debug info is available
     pub line: Option<u32>,
 
-    /// True if this frame is in the main executable (user code).
-    /// False for shared libraries, system calls, or runtime code.
+    /// Classification of this frame's origin (user code, std lib, runtime, etc.)
+    /// Used to distinguish user application code from statically-linked libraries.
+    pub origin: FrameOrigin,
+
+    /// True if this frame is user application code.
+    /// Derived from `origin.is_user_code()` for backward compatibility.
     /// Used by the UI to highlight user code in green vs dim for libraries.
     pub is_user_code: bool,
 }
