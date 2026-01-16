@@ -75,6 +75,41 @@ const STYLE_DIM: Style = Style::new().fg(INFO_DIM);
 const STYLE_KEY: Style = Style::new().fg(CAUTION_AMBER); // Keyboard shortcut highlight
 const STYLE_TEXT: Style = Style::new().fg(ratatui::style::Color::White);
 
+/// Format a duration in seconds as a human-readable string (e.g., "2d 4h 23m")
+fn format_duration_human(secs: f64) -> String {
+    let total_secs = secs as u64;
+
+    if total_secs == 0 {
+        return "0s".to_string();
+    }
+
+    let days = total_secs / 86400;
+    let hours = (total_secs % 86400) / 3600;
+    let mins = (total_secs % 3600) / 60;
+    let secs = total_secs % 60;
+
+    let mut parts = Vec::new();
+    if days > 0 {
+        parts.push(format!("{days}d"));
+    }
+    if hours > 0 {
+        parts.push(format!("{hours}h"));
+    }
+    if mins > 0 {
+        parts.push(format!("{mins}m"));
+    }
+    // Only show seconds if duration is less than an hour
+    if secs > 0 && total_secs < 3600 {
+        parts.push(format!("{secs}s"));
+    }
+
+    if parts.is_empty() {
+        "0s".to_string()
+    } else {
+        parts.join(" ")
+    }
+}
+
 // =============================================================================
 // VIEW MODES
 // =============================================================================
@@ -201,6 +236,7 @@ fn centered_popup(area: Rect, width_percent: u16, height_lines: u16) -> Rect {
 /// Styled as an F-35 targeting computer UI with:
 /// - Severity-colored header and brackets (green/amber/red based on CPU%)
 /// - Military-style labels: TGT (target), CPU, LOC (location), HIT (samples)
+/// - Call trace showing the full call stack
 /// - Per-worker distribution bars
 ///
 /// # Severity Thresholds
@@ -212,7 +248,18 @@ fn render_drilldown_overlay(
     area: Rect,
     hotspot: &crate::analysis::FunctionHotspot,
 ) {
-    let popup_area = centered_popup(area, 60, 20);
+    // Calculate popup height based on content
+    let has_call_stack = !hotspot.call_stacks.is_empty();
+    let call_stack_lines = if has_call_stack {
+        hotspot.call_stacks.first().map_or(0, |s| s.len().min(5)) + 2 // header + frames + spacing
+    } else {
+        0
+    };
+    let worker_lines = hotspot.workers.len().min(4) + 1;
+    let base_height = 16; // Header + stats + footer
+    let popup_height = (base_height + call_stack_lines + worker_lines).min(35) as u16;
+
+    let popup_area = centered_popup(area, 65, popup_height);
     let inner_width = popup_area.width.saturating_sub(4) as usize;
 
     // Severity color based on CPU percentage
@@ -287,6 +334,59 @@ fn render_drilldown_overlay(
         Line::from(Span::styled("  └─", Style::new().fg(severity_color))),
         Line::from(""),
     ];
+
+    // Call trace section - inverted to show: your_code → library → blocking_fn
+    const MAX_FRAMES: usize = 8;
+
+    if let Some(call_stack) = hotspot.call_stacks.first() {
+        lines.push(Line::from(Span::styled("  CALL TRACE", STYLE_DIM)));
+
+        // Reverse stack: show caller (your code) first, blocking function last
+        let frames: Vec<_> = call_stack.iter().rev().take(MAX_FRAMES).collect();
+        let last_idx = frames.len().saturating_sub(1);
+
+        for (i, frame) in frames.into_iter().enumerate() {
+            let arrow = if i == last_idx { "└→" } else { "├→" };
+
+            // Truncate long function names
+            let max_len = inner_width.saturating_sub(20);
+            let func_display = if frame.function.len() > max_len {
+                format!("{}…", &frame.function[..max_len.saturating_sub(1)])
+            } else {
+                frame.function.clone()
+            };
+
+            // User code in green, library code dimmed
+            let style = if frame.is_user_code { Style::new().fg(HUD_GREEN) } else { STYLE_DIM };
+
+            // Format location as "file.rs:42" or empty string
+            let location = frame.file.as_ref().map_or(String::new(), |path| {
+                let filename =
+                    std::path::Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or(path);
+                frame.line.map_or(filename.to_string(), |ln| format!("{filename}:{ln}"))
+            });
+
+            lines.push(Line::from(vec![
+                Span::styled(format!("    {arrow} "), STYLE_DIM),
+                Span::styled(func_display, style),
+                Span::styled(format!("  {location}"), STYLE_DIM),
+            ]));
+        }
+
+        if call_stack.len() > MAX_FRAMES {
+            lines.push(Line::from(Span::styled(
+                format!("       ... +{} more frames", call_stack.len() - MAX_FRAMES),
+                STYLE_DIM,
+            )));
+        }
+
+        lines.push(Line::from(""));
+    } else {
+        // No call stack available
+        lines.push(Line::from(Span::styled("  CALL TRACE", STYLE_DIM)));
+        lines.push(Line::from(Span::styled("    ℹ No call stack captured", STYLE_DIM)));
+        lines.push(Line::from(""));
+    }
 
     // Worker breakdown with tactical styling
     if !hotspot.workers.is_empty() {
@@ -374,6 +474,8 @@ fn render_search_overlay(f: &mut ratatui::Frame, area: Rect, query: &str) {
 struct LiveApp {
     /// Accumulates events as they arrive from eBPF
     live_data: LiveData,
+    /// Hotspot statistics for efficient aggregation
+    hotspot_stats: crate::analysis::HotspotStats,
     /// Hotspot view (rebuilt on each update, preserves selection)
     hotspot_view: Option<HotspotView>,
 
@@ -390,6 +492,7 @@ impl LiveApp {
     fn new() -> Self {
         Self {
             live_data: LiveData::new(),
+            hotspot_stats: crate::analysis::HotspotStats::new(),
             hotspot_view: None,
             view_mode: ViewMode::Analysis,
             search_query: String::new(),
@@ -474,15 +577,16 @@ impl LiveApp {
     /// # State Preserved
     /// - `selected_index` - Cursor position in hotspot list
     /// - Active search filter query
-    fn update_hotspot_view(&mut self, trace_data: &TraceData) {
+    fn update_hotspot_view(&mut self) {
         // Capture current state before rebuilding
         let (old_selected, old_filter) = self
             .hotspot_view
             .as_ref()
             .map_or((0, false), |hv| (hv.selected_index, hv.is_filtered()));
 
-        // Create fresh view with updated data
-        let mut new_view = HotspotView::new(trace_data);
+        // Get hotspots from HotspotStats (efficient aggregation)
+        let hotspots = self.hotspot_stats.to_hotspots();
+        let mut new_view = HotspotView::from_hotspots(hotspots);
 
         // Restore selection index if still valid (rankings may have shifted)
         if old_selected < new_view.hotspots.len() {
@@ -510,6 +614,10 @@ impl LiveApp {
 /// 3. Updates the display at 10Hz (100ms intervals)
 /// 4. Handles keyboard input
 /// 5. Cleans up terminal on exit
+///
+/// # Arguments
+/// * `event_rx` - Channel receiving trace events from eBPF
+/// * `pid` - Process ID being profiled (for display)
 ///
 /// # Errors
 /// Returns an error if terminal setup or rendering fails
@@ -539,6 +647,8 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
     loop {
         // Drain all pending events from eBPF (non-blocking)
         while let Ok(event) = event_rx.try_recv() {
+            // Record to stats aggregator, then add to raw event storage
+            app.hotspot_stats.record_event(&event);
             app.live_data.add_event(event);
         }
 
@@ -547,8 +657,8 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
 
         // Redraw periodically
         if last_update.elapsed() >= UPDATE_INTERVAL {
-            // Update hotspot view (preserves selection)
-            app.update_hotspot_view(&trace_data);
+            // Rebuild hotspot view from aggregated stats (preserves selection)
+            app.update_hotspot_view();
 
             let status_panel = StatusPanel::new(&trace_data);
             let workers_panel = WorkersPanel::new(&trace_data);
@@ -565,13 +675,18 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
                     ])
                     .split(f.area());
 
-                // Header - tactical live display
+                // Header - tactical live display with session info
                 let pid_display = pid.map_or_else(|| "---".to_string(), |p| p.to_string());
                 let rate = if trace_data.duration > 0.0 {
                     trace_data.events.len() as f64 / trace_data.duration
                 } else {
                     0.0
                 };
+
+                // Show session duration and sample count
+                let session_str = format_duration_human(trace_data.duration);
+                let sample_count = app.hotspot_stats.total_samples();
+
                 let header = Paragraph::new(vec![Line::from(vec![
                     Span::styled("HUD", STYLE_HEADING),
                     Span::styled(" | ", STYLE_DIM),
@@ -582,15 +697,9 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
                     Span::styled(" | ", STYLE_DIM),
                     Span::styled(format!("PID:{pid_display}"), Style::new().fg(HUD_GREEN)),
                     Span::styled(" | ", STYLE_DIM),
-                    Span::styled(
-                        format!("{:.1}s", trace_data.duration),
-                        Style::new().fg(HUD_GREEN),
-                    ),
+                    Span::styled(format!("duration:{session_str}"), Style::new().fg(HUD_GREEN)),
                     Span::styled(" | ", STYLE_DIM),
-                    Span::styled(
-                        format!("{} evts", trace_data.events.len()),
-                        Style::new().fg(CAUTION_AMBER),
-                    ),
+                    Span::styled(format!("{sample_count} samples"), Style::new().fg(CAUTION_AMBER)),
                     Span::styled(format!(" ({rate:.0}/s)"), STYLE_DIM),
                 ])])
                 .block(

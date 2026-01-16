@@ -11,6 +11,41 @@ use super::theme::{severity_marker, CAUTION_AMBER, HUD_GREEN, INFO_DIM, SEL_CURS
 use crate::analysis::{analyze_hotspots, FunctionHotspot};
 use crate::trace_data::TraceData;
 
+/// Format a duration in seconds as a human-readable string (e.g., "2d 4h 23m")
+fn format_duration_human(secs: f64) -> String {
+    let total_secs = secs as u64;
+
+    if total_secs == 0 {
+        return "0s".to_string();
+    }
+
+    let days = total_secs / 86400;
+    let hours = (total_secs % 86400) / 3600;
+    let mins = (total_secs % 3600) / 60;
+    let secs_rem = total_secs % 60;
+
+    let mut parts = Vec::new();
+    if days > 0 {
+        parts.push(format!("{days}d"));
+    }
+    if hours > 0 {
+        parts.push(format!("{hours}h"));
+    }
+    if mins > 0 {
+        parts.push(format!("{mins}m"));
+    }
+    // Only show seconds if duration is less than an hour
+    if secs_rem > 0 && total_secs < 3600 {
+        parts.push(format!("{secs_rem}s"));
+    }
+
+    if parts.is_empty() {
+        "0s".to_string()
+    } else {
+        parts.join(" ")
+    }
+}
+
 // Pure data operations (filtering logic separated from UI state)
 
 /// Filter hotspots by function name (case-insensitive substring match)
@@ -48,7 +83,15 @@ fn rebuild_hotspots_for_workers(data: &TraceData, worker_ids: &[u32]) -> Vec<Fun
             let count: usize = workers.values().sum();
             let percentage =
                 if total_samples > 0 { (count as f64 / total_samples as f64) * 100.0 } else { 0.0 };
-            FunctionHotspot { name, count, percentage, workers, file, line }
+            FunctionHotspot {
+                name,
+                count,
+                percentage,
+                workers,
+                file,
+                line,
+                call_stacks: Vec::new(),
+            }
         })
         .collect();
 
@@ -75,6 +118,18 @@ impl HotspotView {
         // Use analysis module to compute hotspots
         let hotspots = analyze_hotspots(data);
 
+        Self {
+            scroll_offset: 0,
+            selected_index: 0,
+            all_hotspots: hotspots.clone(),
+            hotspots,
+            filter_active: false,
+        }
+    }
+
+    /// Create a `HotspotView` from pre-computed hotspots (e.g., from `HotspotStats`)
+    #[must_use]
+    pub fn from_hotspots(hotspots: Vec<FunctionHotspot>) -> Self {
         Self {
             scroll_offset: 0,
             selected_index: 0,
@@ -143,7 +198,7 @@ impl HotspotView {
         self.scroll_offset = 0;
     }
 
-    pub fn render(&self, f: &mut Frame, area: Rect, _data: &TraceData) {
+    pub fn render(&self, f: &mut Frame, area: Rect, data: &TraceData) {
         let mut lines = vec![];
 
         // Calculate visible items (2 lines per item now: name+pct, location)
@@ -215,10 +270,16 @@ impl HotspotView {
             ]));
         }
 
+        // Format duration for title
+        let duration_str = format_duration_human(data.duration);
         let title = if self.filter_active {
-            format!("Hotspots [{}/{}]", self.hotspots.len(), self.all_hotspots.len())
+            format!(
+                "Hotspots ({duration_str}) [{}/{}]",
+                self.hotspots.len(),
+                self.all_hotspots.len()
+            )
         } else {
-            "Hotspots".to_string()
+            format!("Hotspots ({duration_str})")
         };
 
         let paragraph = Paragraph::new(lines).block(

@@ -5,4 +5,4 @@
 
 pub mod hotspot_analyzer;
 
-pub use hotspot_analyzer::{analyze_hotspots, FunctionHotspot};
+pub use hotspot_analyzer::{analyze_hotspots, FunctionHotspot, HotspotStats};
