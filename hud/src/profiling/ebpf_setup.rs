@@ -154,12 +154,11 @@ pub fn setup_scheduler_detection(bpf: &mut Ebpf, pid: i32, threshold_ms: u64) ->
     println!("\n🔧 Setting up scheduler-based detection...");
 
     // 1. Set configuration (threshold and target PID)
-    let threshold_ns = threshold_ms.saturating_mul(NS_PER_MS);
     let mut config_map: HashMap<_, u32, u64> =
         HashMap::try_from(bpf.map_mut("CONFIG").context("CONFIG map not found")?)?;
-    config_map.insert(0, threshold_ns, 0)?; // threshold in nanoseconds
+    config_map.insert(0, threshold_ms.saturating_mul(NS_PER_MS), 0)?; // threshold in nanoseconds
     config_map.insert(1, pid as u64, 0)?; // target PID for perf_event filtering
-    info!("✓ Set blocking threshold: {}ms", threshold_ms);
+    info!("✓ Set blocking threshold: {threshold_ms}ms");
     info!("✓ Set target PID: {pid}");
 
     // 2. Identify and register Tokio worker threads

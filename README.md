@@ -85,23 +85,7 @@ sudo hud my-app --threshold 1    # more sensitive
 sudo hud my-app --export trace.json --headless --duration 60
 ```
 
-### Choosing a threshold
-
-The `--threshold` flag controls how long a worker must block before hud reports it.
-
-```
-1ms      Low-latency: games, fintech, real-time APIs
-         You'll see real events here (DNS, file I/O, JSON parsing). More signal, more noise.
-
-5ms      Standard: web services, REST APIs [default]
-         Good balance between signal and noise for most apps.
-
-10-20ms  Relaxed: background workers, batch jobs, cron tasks
-         When throughput matters more than latency.
-
-50ms+    Debugging: finding severe blocks only
-         Start here if overwhelmed with events, then lower gradually.
-```
+See [Tuning](docs/TUNING.md) for threshold selection guide.
 
 ## Demo
 
@@ -128,6 +112,7 @@ Press `Q` to quit hud.
 
 ## Docs
 
+- [Tuning](docs/TUNING.md) — Threshold selection guide
 - [Troubleshooting](docs/TROUBLESHOOTING.md) — Common issues
 - [Architecture](docs/ARCHITECTURE.md) — How it works internally
 - [Development](docs/DEVELOPMENT.md) — Contributing
