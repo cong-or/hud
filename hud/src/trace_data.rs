@@ -6,7 +6,7 @@
 //! - [`LiveData`] - Accumulates events from eBPF
 //! - [`TraceData`] - Immutable snapshot for rendering (cheap Arc clones)
 //! - [`StackFrame`] - A single frame in a resolved call stack
-//! - [`StackCache`] - Deduplicates resolved stacks by eBPF stack_id
+//! - [`StackCache`] - Deduplicates resolved stacks by eBPF `stack_id`
 //!
 //! # Memory Model
 //!
@@ -41,7 +41,7 @@ use crate::classification::FrameOrigin;
 /// allowing the UI to highlight user code more prominently.
 #[derive(Debug, Clone)]
 pub struct StackFrame {
-    /// Fully qualified function name (e.g., "myapp::handler::process_request")
+    /// Fully qualified function name (e.g., `myapp::handler::process_request`)
     pub function: String,
 
     /// Source file path, if debug info is available
@@ -60,7 +60,7 @@ pub struct StackFrame {
     pub is_user_code: bool,
 }
 
-/// Cache of resolved stack traces, keyed by eBPF stack_id.
+/// Cache of resolved stack traces, keyed by eBPF `stack_id`.
 ///
 /// # Why Cache?
 ///
@@ -79,7 +79,7 @@ pub struct StackFrame {
 /// × ~50 bytes each), maximum memory is ~1 MB.
 #[derive(Debug, Default)]
 pub struct StackCache {
-    /// Map from eBPF stack_id to resolved frames.
+    /// Map from eBPF `stack_id` to resolved frames.
     /// Uses `Arc` so multiple `TraceEvent`s can share the same stack.
     stacks: HashMap<i64, Arc<Vec<StackFrame>>>,
 }
@@ -93,7 +93,7 @@ impl StackCache {
 
     /// Get a cached stack by ID, returning a cheap `Arc` clone.
     ///
-    /// Returns `None` if this stack_id hasn't been resolved yet.
+    /// Returns `None` if this `stack_id` hasn't been resolved yet.
     #[must_use]
     pub fn get(&self, stack_id: i64) -> Option<Arc<Vec<StackFrame>>> {
         self.stacks.get(&stack_id).cloned()
@@ -170,7 +170,7 @@ pub struct TraceEvent {
     /// Used for per-worker breakdown in the drilldown view.
     pub worker_id: u32,
 
-    /// Linux thread ID (from gettid()).
+    /// Linux thread ID (from `gettid()`).
     /// Useful for correlating with external tools like `perf`.
     pub tid: u32,
 
@@ -183,8 +183,8 @@ pub struct TraceEvent {
 
     /// How this event was detected:
     /// - 2 = scheduler-based (off-CPU threshold)
-    /// - 3 = tracepoint-based (sched_switch)
-    /// - 4 = sampling-based (perf_event)
+    /// - 3 = tracepoint-based (`sched_switch`)
+    /// - 4 = sampling-based (`perf_event`)
     pub detection_method: Option<u32>,
 
     /// Source file of the top frame (if debug info available).
@@ -238,8 +238,8 @@ pub struct TraceData {
 ///
 /// # Performance
 ///
-/// - Adding events: O(1) amortized (Vec::push)
-/// - Converting to TraceData: O(1) (Arc::clone)
+/// - Adding events: O(1) amortized (`Vec::push`)
+/// - Converting to `TraceData`: O(1) (`Arc::clone`)
 #[derive(Debug, Default)]
 pub struct LiveData {
     /// All events, wrapped in Arc for cheap cloning.

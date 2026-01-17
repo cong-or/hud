@@ -18,6 +18,11 @@
 //!
 //! 3. **Memory range** - Last resort for unresolved frames
 
+use log::warn;
+use std::collections::HashSet;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
+
 /// Origin of a stack frame, used to distinguish user code from libraries.
 ///
 /// The classification affects how frames are displayed in the TUI:
@@ -54,7 +59,7 @@ impl FrameOrigin {
 ///
 /// # Arguments
 ///
-/// * `function` - Fully qualified function name (e.g., "tokio::runtime::spawn")
+/// * `function` - Fully qualified function name (e.g., `tokio::runtime::spawn`)
 /// * `file` - Source file path from DWARF debug info, if available
 /// * `in_executable` - Whether the address is within the main executable's memory range
 ///
@@ -90,6 +95,9 @@ pub fn classify_frame(function: &str, file: Option<&str>, in_executable: bool) -
     // === FILE PATH CLASSIFICATION ===
     // File paths are the most reliable signal when debug info is available
     if let Some(path) = file {
+        // Record that we had debug info for this frame
+        diagnostics().record_classification(function, true);
+
         // Cargo registry: third-party crates
         // e.g., /home/user/.cargo/registry/src/index.crates.io-xxx/tokio-1.0.0/src/runtime.rs
         if path.contains(".cargo/registry/") || path.contains(".cargo\\registry\\") {
@@ -131,6 +139,9 @@ pub fn classify_frame(function: &str, file: Option<&str>, in_executable: bool) -
 
     // === FUNCTION NAME CLASSIFICATION ===
     // Fallback when file paths aren't available (stripped binaries, etc.)
+    // Record that we're falling back to heuristics (no debug info)
+    diagnostics().record_classification(function, false);
+
     if let Some(origin) = classify_by_function_prefix(function) {
         return origin;
     }
@@ -225,6 +236,89 @@ fn classify_by_function_prefix(function: &str) -> Option<FrameOrigin> {
 /// Check if a file path belongs to a known runtime crate.
 fn is_runtime_path(path: &str) -> bool {
     RUNTIME_CRATE_PATTERNS.iter().any(|pattern| path.contains(pattern))
+}
+
+// =============================================================================
+// CLASSIFICATION DIAGNOSTICS
+// =============================================================================
+
+/// Tracks classification diagnostics to help users understand when frame
+/// classification falls back to function prefix heuristics due to missing debug info.
+pub struct ClassificationDiagnostics {
+    /// Functions that have already been warned about (to avoid log spam)
+    warned_functions: Mutex<HashSet<String>>,
+    /// Count of frames classified with file path info available
+    frames_with_debug_info: AtomicU64,
+    /// Count of frames classified without file path info (fallback to prefix/memory)
+    frames_without_debug_info: AtomicU64,
+}
+
+impl ClassificationDiagnostics {
+    /// Create a new diagnostics tracker.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            warned_functions: Mutex::new(HashSet::new()),
+            frames_with_debug_info: AtomicU64::new(0),
+            frames_without_debug_info: AtomicU64::new(0),
+        }
+    }
+
+    /// Record a frame classification, optionally logging a warning for missing debug info.
+    ///
+    /// # Arguments
+    /// * `function` - The function name being classified
+    /// * `had_file_path` - Whether a file path was available for classification
+    pub fn record_classification(&self, function: &str, had_file_path: bool) {
+        if had_file_path {
+            self.frames_with_debug_info.fetch_add(1, Ordering::Relaxed);
+        } else {
+            self.frames_without_debug_info.fetch_add(1, Ordering::Relaxed);
+
+            // Log warning once per function (avoid spam)
+            // Using insert() return value avoids double hash lookup vs contains() + insert()
+            if let Ok(mut warned) = self.warned_functions.lock() {
+                if warned.insert(function.to_owned()) {
+                    warn!("No debug info for '{function}' - using function prefix heuristic");
+                }
+            }
+        }
+    }
+
+    /// Calculate the percentage of frames that had debug info available.
+    ///
+    /// Returns 100.0 if no frames have been classified yet.
+    #[allow(clippy::cast_precision_loss)] // Precision loss acceptable for percentages
+    pub fn debug_info_coverage(&self) -> f64 {
+        let with = self.frames_with_debug_info.load(Ordering::Relaxed);
+        let without = self.frames_without_debug_info.load(Ordering::Relaxed);
+        let total = with + without;
+
+        if total == 0 {
+            100.0 // No frames yet, assume full coverage
+        } else {
+            (with as f64 / total as f64) * 100.0
+        }
+    }
+
+    /// Returns true if debug info coverage is below 50%.
+    pub fn has_low_coverage(&self) -> bool {
+        self.debug_info_coverage() < 50.0
+    }
+}
+
+impl Default for ClassificationDiagnostics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Global diagnostics instance, initialized on first access.
+static DIAGNOSTICS: OnceLock<ClassificationDiagnostics> = OnceLock::new();
+
+/// Get the global classification diagnostics tracker.
+pub fn diagnostics() -> &'static ClassificationDiagnostics {
+    DIAGNOSTICS.get_or_init(ClassificationDiagnostics::new)
 }
 
 #[cfg(test)]

@@ -10,6 +10,7 @@ use std::collections::HashMap;
 
 use super::theme::{gauge_bar, CAUTION_AMBER, HUD_GREEN, INFO_DIM};
 use super::TraceData;
+use crate::classification::diagnostics;
 
 /// Master Status panel - tactical system overview
 pub struct StatusPanel {
@@ -17,6 +18,8 @@ pub struct StatusPanel {
     busiest_worker: Option<(u32, f64)>,
     total_events: usize,
     worker_count: usize,
+    debug_info_coverage: f64,
+    low_debug_coverage: bool,
 }
 
 impl StatusPanel {
@@ -50,13 +53,18 @@ impl StatusPanel {
                 (*worker_id, percentage)
             });
 
-        let has_warnings = busiest.is_some_and(|(_, pct)| pct > 50.0);
+        // Get coverage once, derive low_coverage from it (avoids redundant atomic loads)
+        let debug_info_coverage = diagnostics().debug_info_coverage();
+        let low_debug_coverage = debug_info_coverage < 50.0;
+        let has_warnings = busiest.is_some_and(|(_, pct)| pct > 50.0) || low_debug_coverage;
 
         Self {
             has_warnings,
             busiest_worker: busiest,
             total_events: data.events.len(),
             worker_count: data.workers.len(),
+            debug_info_coverage,
+            low_debug_coverage,
         }
     }
 
@@ -85,6 +93,17 @@ impl StatusPanel {
             Span::styled(" Workers ", Style::default().fg(INFO_DIM)),
             Span::styled(format!("{}", self.worker_count), Style::default().fg(HUD_GREEN)),
         ]));
+
+        // Debug info coverage indicator
+        let debug_color = if self.low_debug_coverage { CAUTION_AMBER } else { HUD_GREEN };
+        lines.push(Line::from(vec![
+            Span::styled(" Debug   ", Style::default().fg(INFO_DIM)),
+            Span::styled(
+                format!("{:.0}%", self.debug_info_coverage),
+                Style::default().fg(debug_color),
+            ),
+        ]));
+
         lines.push(Line::from(""));
 
         // Busiest worker with gauge

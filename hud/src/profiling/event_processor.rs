@@ -149,22 +149,22 @@ impl<'a> EventProcessor<'a> {
 
     /// Resolve full call stack from eBPF stack trace map.
     ///
-    /// This is the core symbolization logic. It takes a raw stack_id from eBPF,
+    /// This is the core symbolization logic. It takes a raw `stack_id` from eBPF,
     /// fetches the instruction pointer addresses from the kernel's stack trace map,
     /// and resolves each address to a human-readable function name using DWARF.
     ///
     /// # Caching
     ///
-    /// eBPF automatically deduplicates identical stacks (same stack_id = same call path).
-    /// We leverage this by caching resolved stacks - if we've seen this stack_id before,
+    /// eBPF automatically deduplicates identical stacks (same `stack_id` = same call path).
+    /// We leverage this by caching resolved stacks - if we've seen this `stack_id` before,
     /// we return the cached `Arc<Vec<StackFrame>>` immediately.
     ///
     /// Typical applications have 50-500 unique call paths, so the cache hit rate is high.
     ///
     /// # Performance
     ///
-    /// - Cache hit: O(1) HashMap lookup + Arc clone
-    /// - Cache miss: O(stack_depth) × O(DWARF lookup) - expensive but rare after warmup
+    /// - Cache hit: O(1) `HashMap` lookup + Arc clone
+    /// - Cache miss: `O(stack_depth)` × O(DWARF lookup) - expensive but rare after warmup
     ///
     /// # Address Adjustment (PIE)
     ///
@@ -193,9 +193,8 @@ impl<'a> EventProcessor<'a> {
         // === FETCH FROM EBPF ===
         // Read the stack trace from kernel's BPF_MAP_TYPE_STACK_TRACE map.
         // The map stores arrays of instruction pointer (IP) addresses.
-        let stack_trace = match stack_traces.get(&stack_id_wrapped.as_map_key(), 0) {
-            Ok(trace) => trace,
-            Err(_) => return None, // Stack may have been evicted from kernel map
+        let Ok(stack_trace) = stack_traces.get(&stack_id_wrapped.as_map_key(), 0) else {
+            return None; // Stack may have been evicted from kernel map
         };
 
         let frames = stack_trace.frames();
@@ -207,7 +206,7 @@ impl<'a> EventProcessor<'a> {
         // Walk the stack from top (blocking function) to bottom (main/runtime entry)
         let mut resolved_frames = Vec::with_capacity(frames.len());
 
-        for stack_frame in frames.iter() {
+        for stack_frame in frames {
             let addr = stack_frame.ip; // Instruction pointer (return address)
 
             // Null address marks end of stack (padding in fixed-size kernel array)

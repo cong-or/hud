@@ -20,12 +20,13 @@
 //!
 //! # Performance
 //!
-//! - `record_event()`: O(1) amortized (HashMap insert/update)
+//! - `record_event()`: O(1) amortized (`HashMap` insert/update)
 //! - `to_hotspots()`: O(n log n) where n = unique functions (sorting)
 //! - Memory: O(unique functions) × O(call stacks per function)
 
 // Percentage calculations intentionally convert usize to f64
-#![allow(clippy::cast_precision_loss)]
+// Count truncation on 32-bit is acceptable (won't overflow in practice)
+#![allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
 
 use crate::trace_data::{StackFrame, TraceData, TraceEvent};
 use std::collections::{HashMap, HashSet};
@@ -62,7 +63,7 @@ const MAX_CALL_STACKS_PER_HOTSPOT: usize = 5;
 /// ```
 #[derive(Debug, Clone)]
 pub struct FunctionHotspot {
-    /// Fully qualified function name (e.g., "myapp::crypto::encrypt").
+    /// Fully qualified function name (e.g., `myapp::crypto::encrypt`).
     pub name: String,
 
     /// Total sample count for this function.
@@ -71,7 +72,7 @@ pub struct FunctionHotspot {
     /// Percentage of total samples (0.0 - 100.0).
     pub percentage: f64,
 
-    /// Per-worker breakdown: worker_id → sample count.
+    /// Per-worker breakdown: `worker_id` → sample count.
     /// Used for the "WORKER DISTRIBUTION" section in drilldown.
     pub workers: HashMap<u32, usize>,
 
@@ -100,8 +101,8 @@ pub struct FunctionHotspot {
 ///
 /// # Memory Usage
 ///
-/// - O(unique function names) × O(workers) for the main HashMap
-/// - O(unique call stacks) bounded by MAX_CALL_STACKS_PER_HOTSPOT
+/// - O(unique function names) × O(workers) for the main `HashMap`
+/// - O(unique call stacks) bounded by `MAX_CALL_STACKS_PER_HOTSPOT`
 /// - Typical: 100-500 functions × ~1 KB each ≈ 0.5 MB
 #[derive(Debug, Default)]
 pub struct HotspotStats {
@@ -134,7 +135,7 @@ struct FunctionStats {
     seen_stack_ids: HashSet<i64>,
 
     /// Representative call stacks with their occurrence counts.
-    /// Limited to MAX_CALL_STACKS_PER_HOTSPOT entries.
+    /// Limited to `MAX_CALL_STACKS_PER_HOTSPOT` entries.
     call_stacks: Vec<(Arc<Vec<StackFrame>>, u64)>,
 }
 
@@ -151,7 +152,7 @@ impl HotspotStats {
     ///
     /// # Performance
     ///
-    /// O(1) amortized - HashMap operations are constant time on average.
+    /// O(1) amortized - `HashMap` operations are constant time on average.
     /// The stack tracking uses Arc pointer comparison which is also O(1).
     pub fn record_event(&mut self, event: &TraceEvent) {
         // Skip "execution" events - these represent scheduler/idle time,
@@ -237,7 +238,7 @@ impl HotspotStats {
     }
 }
 
-/// Aggregated function data: (worker counts, file, line, call_stacks)
+/// Aggregated function data: (worker counts, file, line, `call_stacks`)
 type FunctionData = (HashMap<u32, usize>, Option<String>, Option<u32>, Vec<Arc<Vec<StackFrame>>>);
 
 /// Analyze trace data to identify function hotspots (batch analysis).

@@ -393,8 +393,17 @@ fn render_drilldown_overlay(
             // Add marker for entry point
             let marker = if is_entry_point { " ◄" } else { "" };
 
+            // Warning marker for frames without debug info (file path missing but has function name)
+            let missing_debug_info = frame.file.is_none() && !frame.function.starts_with("0x");
+            let warning_marker = if missing_debug_info {
+                Span::styled("⚠ ", Style::new().fg(CAUTION_AMBER))
+            } else {
+                Span::raw("")
+            };
+
             lines.push(Line::from(vec![
                 Span::styled(format!("    {arrow} "), STYLE_DIM),
+                warning_marker,
                 Span::styled(func_display, style),
                 Span::styled(format!("  {location}"), STYLE_DIM),
                 Span::styled(marker, Style::new().fg(HUD_GREEN).add_modifier(Modifier::BOLD)),
