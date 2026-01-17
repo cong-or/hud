@@ -11,7 +11,16 @@ use std::path::PathBuf;
 EXAMPLES:
     sudo hud my-app                          Auto-detect PID and binary
     sudo hud --pid 1234                      Explicit PID, auto-detect binary
-    sudo hud --pid 1234 --target ./myapp     Explicit PID and binary"
+    sudo hud --pid 1234 --target ./myapp     Explicit PID and binary
+
+THRESHOLD GUIDE:
+    1ms     Low-latency (games, trading, real-time APIs). At 50k req/s, 1ms blocks 50 requests.
+    5ms     Web services, REST APIs. Good default for most applications.
+    10ms    Background workers, async jobs. Tolerant of occasional delays.
+    50ms+   Finding only severe blocks. Useful for initial debugging.
+
+    Lower = more sensitive (more events, potential noise)
+    Higher = less sensitive (only obvious problems)"
 )]
 pub struct Args {
     /// Process name to profile (auto-detects PID and binary)
@@ -41,4 +50,8 @@ pub struct Args {
     /// Suppress non-essential output
     #[arg(short, long)]
     pub quiet: bool,
+
+    /// Blocking threshold in milliseconds
+    #[arg(long, default_value = "5", value_name = "MS")]
+    pub threshold: u64,
 }

@@ -140,18 +140,26 @@ pub fn register_tokio_workers(bpf: &mut Ebpf, pid: i32) -> Result<usize> {
 /// Setup scheduler-based blocking detection
 /// Returns the number of worker threads registered
 ///
+/// # Arguments
+/// * `bpf` - The loaded eBPF program
+/// * `pid` - Target process ID
+/// * `threshold_ms` - Blocking threshold in milliseconds
+///
 /// # Errors
 /// Returns an error if eBPF map access, tracepoint attachment, or perf event setup fails
 #[allow(clippy::cast_sign_loss)]
-pub fn setup_scheduler_detection(bpf: &mut Ebpf, pid: i32) -> Result<usize> {
+pub fn setup_scheduler_detection(bpf: &mut Ebpf, pid: i32, threshold_ms: u64) -> Result<usize> {
+    const NS_PER_MS: u64 = 1_000_000;
+
     println!("\n🔧 Setting up scheduler-based detection...");
 
-    // 1. Set configuration (5ms threshold and target PID)
+    // 1. Set configuration (threshold and target PID)
+    let threshold_ns = threshold_ms.saturating_mul(NS_PER_MS);
     let mut config_map: HashMap<_, u32, u64> =
         HashMap::try_from(bpf.map_mut("CONFIG").context("CONFIG map not found")?)?;
-    config_map.insert(0, 5_000_000, 0)?; // 5ms threshold in nanoseconds
+    config_map.insert(0, threshold_ns, 0)?; // threshold in nanoseconds
     config_map.insert(1, pid as u64, 0)?; // target PID for perf_event filtering
-    info!("✓ Set blocking threshold: 5ms");
+    info!("✓ Set blocking threshold: {}ms", threshold_ms);
     info!("✓ Set target PID: {pid}");
 
     // 2. Identify and register Tokio worker threads

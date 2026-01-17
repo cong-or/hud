@@ -31,7 +31,7 @@ How hud works under the hood.
 
 ### sched_switch (tracepoint)
 
-Fires on scheduler context switches. Detects when Tokio workers go ON/OFF CPU and reports blocking when off-CPU duration exceeds threshold (5ms).
+Fires on scheduler context switches. Detects when Tokio workers go ON/OFF CPU and reports blocking when off-CPU duration exceeds the threshold (default: 5ms, configurable via `--threshold`).
 
 ### perf_event (99 Hz sampling)
 
@@ -39,7 +39,7 @@ Periodic CPU sampling for stack traces. 99 Hz avoids aliasing with 100 Hz system
 
 ## Detection Methods
 
-**Scheduler-based:** Monitor off-CPU duration, report when > 5ms while TASK_RUNNING.
+**Scheduler-based:** Monitor off-CPU duration, report when exceeding threshold (default 5ms) while TASK_RUNNING.
 - Pros: No code changes, whole-program visibility
 - Cons: False positives from legitimate preemption
 

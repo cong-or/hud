@@ -6,6 +6,8 @@
 
 Find what's blocking your Tokio runtime. Zero-instrumentation eBPF profiler.
 
+> **Linux only.** This tool uses eBPF, which is a Linux kernel feature. It does not work on macOS or Windows.
+
 ```bash
 sudo hud my-server
 ```
@@ -75,9 +77,32 @@ sudo hud my-app
 # Profile by PID
 sudo hud --pid 1234
 
+# Custom blocking threshold (default: 5ms)
+sudo hud my-app --threshold 10   # less sensitive
+sudo hud my-app --threshold 1    # more sensitive
+
 # Headless mode (CI/scripting)
 sudo hud my-app --export trace.json --headless --duration 60
 ```
+
+### Choosing a threshold
+
+The `--threshold` flag controls how long a worker must block before hud reports it.
+
+| Threshold | Use case |
+|-----------|----------|
+| **1ms** | Real-time systems — games, trading, audio. Catches issues before they compound. |
+| **5ms** | Web services, REST APIs. Good default for most applications. |
+| **10-20ms** | Background workers, batch jobs. Use when throughput matters more than latency. |
+| **50ms+** | Initial debugging. Start here if you're seeing too many events. |
+
+**Why blocking matters:**
+
+- Tokio expects tasks to yield within microseconds — 1ms is already 1000x longer than typical async work
+- Blocks compound across workers, causing tail latency spikes
+- At 10k req/s, a 5ms block affects ~50 concurrent requests
+
+**Rule of thumb:** Start with 5ms. Lower it to catch subtler issues, raise it to reduce noise.
 
 ## Demo
 

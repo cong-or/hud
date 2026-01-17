@@ -147,7 +147,7 @@ async fn run() -> Result<()> {
     }
 
     // Setup scheduler-based detection
-    let worker_count = setup_scheduler_detection(&mut bpf, pid)?;
+    let worker_count = setup_scheduler_detection(&mut bpf, pid, args.threshold)?;
     if !quiet {
         println!("workers: {worker_count}");
     }
