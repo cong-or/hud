@@ -89,20 +89,19 @@ sudo hud my-app --export trace.json --headless --duration 60
 
 The `--threshold` flag controls how long a worker must block before hud reports it.
 
-| Threshold | Use case |
-|-----------|----------|
-| **1ms** | Real-time systems — games, trading, audio. Catches issues before they compound. |
-| **5ms** | Web services, REST APIs. Good default for most applications. |
-| **10-20ms** | Background workers, batch jobs. Use when throughput matters more than latency. |
-| **50ms+** | Initial debugging. Start here if you're seeing too many events. |
+```
+1ms      Low-latency: games, fintech, real-time APIs
+         You'll see real events here (DNS, file I/O, JSON parsing). More signal, more noise.
 
-**Why blocking matters:**
+5ms      Standard: web services, REST APIs [default]
+         Good balance between signal and noise for most apps.
 
-- Tokio expects tasks to yield within microseconds — 1ms is already 1000x longer than typical async work
-- Blocks compound across workers, causing tail latency spikes
-- At 10k req/s, a 5ms block affects ~50 concurrent requests
+10-20ms  Relaxed: background workers, batch jobs, cron tasks
+         When throughput matters more than latency.
 
-**Rule of thumb:** Start with 5ms. Lower it to catch subtler issues, raise it to reduce noise.
+50ms+    Debugging: finding severe blocks only
+         Start here if overwhelmed with events, then lower gradually.
+```
 
 ## Demo
 

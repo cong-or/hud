@@ -14,7 +14,7 @@ EXAMPLES:
     sudo hud --pid 1234 --target ./myapp     Explicit PID and binary
 
 THRESHOLD GUIDE:
-    1ms     Low-latency (games, trading, real-time APIs). At 50k req/s, 1ms blocks 50 requests.
+    1ms     Low-latency (games, fintech, real-time APIs). At 50k req/s, 1ms blocks 50 requests.
     5ms     Web services, REST APIs. Good default for most applications.
     10ms    Background workers, async jobs. Tolerant of occasional delays.
     50ms+   Finding only severe blocks. Useful for initial debugging.
