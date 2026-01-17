@@ -98,7 +98,7 @@ sudo ./target/release/hud --pid $(pgrep demo-server) \
 
 The demo server has intentionally blocking endpoints (`/hash`, `/compress`, `/read`, `/dns`). You'll see `bcrypt` and `blowfish` hotspots from the `/hash` endpoint.
 
-> **Tip**: Use debug builds of your target app for best results. Release builds inline functions aggressively, which can hide your code in stack traces. In the drilldown view, your code is highlighted in **bold green** with flashing **◆** diamond markers.
+> **Tip**: Use debug builds for best results—release builds inline functions and hide your code. See [Troubleshooting](docs/TROUBLESHOOTING.md) if you see low Debug % in the status panel.
 
 Press `Q` to quit hud.
 
