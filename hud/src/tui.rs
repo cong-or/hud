@@ -396,9 +396,6 @@ fn render_drilldown_overlay(
                 frame.line.map_or(filename.to_string(), |ln| format!("{filename}:{ln}"))
             });
 
-            // Add marker for entry point
-            let marker = if is_entry_point { " ◄" } else { "" };
-
             // Warning marker for frames without debug info (file path missing but has function name)
             let missing_debug_info = frame.file.is_none() && !frame.function.starts_with("0x");
             let warning_marker = if missing_debug_info {
@@ -407,13 +404,28 @@ fn render_drilldown_overlay(
                 Span::raw("")
             };
 
-            lines.push(Line::from(vec![
-                Span::styled(format!("    {arrow} "), STYLE_DIM),
-                warning_marker,
-                Span::styled(func_display, style),
-                Span::styled(format!("  {location}"), STYLE_DIM),
-                Span::styled(marker, Style::new().fg(HUD_GREEN).add_modifier(Modifier::BOLD)),
-            ]));
+            // Entry point gets flashing diamond targeting brackets
+            if is_entry_point {
+                let diamond_style = Style::new()
+                    .fg(HUD_GREEN)
+                    .add_modifier(Modifier::BOLD)
+                    .add_modifier(Modifier::SLOW_BLINK);
+                lines.push(Line::from(vec![
+                    Span::styled(format!("    {arrow} "), STYLE_DIM),
+                    warning_marker,
+                    Span::styled("◆ ", diamond_style),
+                    Span::styled(func_display, style),
+                    Span::styled(" ◆", diamond_style),
+                    Span::styled(format!("  {location}"), STYLE_DIM),
+                ]));
+            } else {
+                lines.push(Line::from(vec![
+                    Span::styled(format!("    {arrow} "), STYLE_DIM),
+                    warning_marker,
+                    Span::styled(func_display, style),
+                    Span::styled(format!("  {location}"), STYLE_DIM),
+                ]));
+            }
         }
 
         let total = call_stack.len();
