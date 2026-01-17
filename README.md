@@ -112,7 +112,8 @@ Press `Q` to quit hud.
 
 ## Docs
 
-- [Tuning](docs/TUNING.md) — Threshold selection guide
+- [Tuning](docs/TUNING.md) — Threshold selection, debugging workflow
+- [Exports](docs/EXPORTS.md) — JSON format, before/after analysis
 - [Troubleshooting](docs/TROUBLESHOOTING.md) — Common issues
 - [Architecture](docs/ARCHITECTURE.md) — How it works internally
 - [Development](docs/DEVELOPMENT.md) — Contributing
