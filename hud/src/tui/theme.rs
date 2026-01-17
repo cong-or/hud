@@ -6,12 +6,15 @@ use ratatui::style::Color;
 
 // F-35 HUD color scheme
 pub const HUD_GREEN: Color = Color::Rgb(0, 255, 0);
+pub const HUD_CYAN: Color = Color::Rgb(0, 255, 255);
+pub const CYAN_DIM: Color = Color::Rgb(0, 180, 180);
 pub const CRITICAL_RED: Color = Color::Rgb(255, 0, 0);
 pub const CAUTION_AMBER: Color = Color::Rgb(255, 191, 0);
 pub const INFO_DIM: Color = Color::Rgb(0, 180, 0);
 
 // Tactical symbols (ASCII-only for terminal compatibility)
-pub const SEL_CURSOR: &str = ">>>";
+pub const SEL_LEFT: &str = "<";
+pub const SEL_RIGHT: &str = ">";
 pub const MARKER_CRIT: &str = "[X]";
 pub const MARKER_WARN: &str = "[!]";
 pub const MARKER_OK: &str = "[-]";

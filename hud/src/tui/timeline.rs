@@ -2,12 +2,14 @@ use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{block::BorderType, Block, Borders, Paragraph},
     Frame,
 };
 use std::collections::HashMap;
 
-use super::theme::{gauge_bar, CAUTION_AMBER, CRITICAL_RED, HUD_GREEN, INFO_DIM};
+use super::theme::{
+    gauge_bar, CAUTION_AMBER, CRITICAL_RED, CYAN_DIM, HUD_CYAN, HUD_GREEN, INFO_DIM,
+};
 use super::TraceData;
 
 /// Timeline view - tactical activity display showing per-worker statistics
@@ -48,7 +50,7 @@ impl TimelineView {
         // Header stats
         lines.push(Line::from(vec![
             Span::styled("Duration ", Style::default().fg(INFO_DIM)),
-            Span::styled(format!("{:.1}s", data.duration), Style::default().fg(HUD_GREEN)),
+            Span::styled(format!("{:.1}s", data.duration), Style::default().fg(HUD_CYAN)),
             Span::raw("  "),
             Span::styled("Events ", Style::default().fg(INFO_DIM)),
             Span::styled(format!("{}", data.events.len()), Style::default().fg(HUD_GREEN)),
@@ -78,8 +80,8 @@ impl TimelineView {
                 };
 
                 lines.push(Line::from(vec![
-                    Span::styled(format!("W{worker_id:<2} "), Style::default().fg(color)),
-                    Span::styled(format!("{:<8} ", stats.tid), Style::default().fg(INFO_DIM)),
+                    Span::styled(format!("W{worker_id:<2} "), Style::default().fg(HUD_CYAN)),
+                    Span::styled(format!("{:<8} ", stats.tid), Style::default().fg(CYAN_DIM)),
                     Span::styled(
                         format!("{:>4}/{:<4} ", stats.samples_with_functions, stats.total_samples),
                         Style::default().fg(HUD_GREEN),
@@ -93,7 +95,8 @@ impl TimelineView {
         let paragraph = Paragraph::new(lines).block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Activity")
+                .border_type(BorderType::Plain)
+                .title("[ ACTIVITY ]")
                 .border_style(Style::default().fg(HUD_GREEN)),
         );
 

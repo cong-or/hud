@@ -2,13 +2,13 @@ use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{block::BorderType, Block, Borders, Paragraph},
     Frame,
 };
 
 use std::collections::HashMap;
 
-use super::theme::{gauge_bar, CAUTION_AMBER, HUD_GREEN, INFO_DIM};
+use super::theme::{gauge_bar, CAUTION_AMBER, HUD_CYAN, HUD_GREEN, INFO_DIM};
 use super::TraceData;
 use crate::classification::diagnostics;
 
@@ -72,16 +72,18 @@ impl StatusPanel {
         let mut lines = vec![];
 
         // System status line
-        let (status_text, status_color) = if self.has_warnings {
-            ("[!] CAUTION", CAUTION_AMBER)
+        let (status_text, status_style) = if self.has_warnings {
+            (
+                "[!] CAUTION",
+                Style::default()
+                    .fg(CAUTION_AMBER)
+                    .add_modifier(Modifier::BOLD | Modifier::SLOW_BLINK),
+            )
         } else {
-            ("[-] NOMINAL", HUD_GREEN)
+            ("[-] NOMINAL", Style::default().fg(HUD_GREEN).add_modifier(Modifier::BOLD))
         };
 
-        lines.push(Line::from(Span::styled(
-            format!(" {status_text}"),
-            Style::default().fg(status_color).add_modifier(Modifier::BOLD),
-        )));
+        lines.push(Line::from(Span::styled(format!(" {status_text}"), status_style)));
         lines.push(Line::from(""));
 
         // Stats
@@ -111,7 +113,7 @@ impl StatusPanel {
             let bar_color = if percentage > 50.0 { CAUTION_AMBER } else { HUD_GREEN };
             lines.push(Line::from(vec![
                 Span::styled(" Hottest ", Style::default().fg(INFO_DIM)),
-                Span::styled(format!("W{worker_id}"), Style::default().fg(bar_color)),
+                Span::styled(format!("W{worker_id}"), Style::default().fg(HUD_CYAN)),
             ]));
             lines.push(Line::from(vec![
                 Span::raw(" "),
@@ -124,7 +126,8 @@ impl StatusPanel {
         let paragraph = Paragraph::new(lines).block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Status")
+                .border_type(BorderType::Plain)
+                .title("[ STATUS ]")
                 .border_style(Style::default().fg(border_color)),
         );
 

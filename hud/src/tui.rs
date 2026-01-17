@@ -43,7 +43,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{block::BorderType, Block, Borders, Paragraph},
     Terminal,
 };
 use std::io;
@@ -207,7 +207,8 @@ fn render_help_overlay(f: &mut ratatui::Frame, area: Rect) {
     let help_widget = Paragraph::new(help_text).block(
         Block::default()
             .borders(Borders::ALL)
-            .title(" Help ")
+            .border_type(BorderType::Plain)
+            .title("[ HELP ]")
             .style(Style::new().bg(ratatui::style::Color::Black).fg(HUD_GREEN)),
     );
 
@@ -474,7 +475,8 @@ fn render_drilldown_overlay(
     let widget = Paragraph::new(lines).block(
         Block::default()
             .borders(Borders::ALL)
-            .title(" ◈ LOCK ◈ ")
+            .border_type(BorderType::Plain)
+            .title("[ ◈ LOCK ◈ ]")
             .style(Style::new().bg(ratatui::style::Color::Black).fg(HUD_GREEN)),
     );
 
@@ -642,7 +644,8 @@ fn render_search_overlay(f: &mut ratatui::Frame, area: Rect, query: &str) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Filter Functions (Enter to apply, Esc to cancel)")
+                .border_type(BorderType::Plain)
+                .title("[ FILTER ] Enter=apply Esc=cancel")
                 .style(Style::default().bg(ratatui::style::Color::Black).fg(HUD_GREEN)),
         )
         .style(Style::default().fg(CAUTION_AMBER));
@@ -778,23 +781,20 @@ impl LiveApp {
     /// - Active search filter query
     fn update_hotspot_view(&mut self) {
         // Capture current state before rebuilding
-        let (old_selected, old_filter) = self
-            .hotspot_view
-            .as_ref()
-            .map_or((0, false), |hv| (hv.selected_index, hv.is_filtered()));
+        let old_selected = self.hotspot_view.as_ref().map_or(0, |hv| hv.selected_index);
 
         // Get hotspots from HotspotStats (efficient aggregation)
         let hotspots = self.hotspot_stats.to_hotspots();
         let mut new_view = HotspotView::from_hotspots(hotspots);
 
-        // Restore selection index if still valid (rankings may have shifted)
-        if old_selected < new_view.hotspots.len() {
-            new_view.selected_index = old_selected;
+        // Re-apply search filter if active
+        if !self.search_query.is_empty() {
+            new_view.apply_filter(&self.search_query);
         }
 
-        // Re-apply filter if user had an active search
-        if old_filter && !self.search_query.is_empty() {
-            new_view.apply_filter(&self.search_query);
+        // Restore selection index if still valid (after filtering)
+        if old_selected < new_view.hotspots.len() {
+            new_view.selected_index = old_selected;
         }
 
         self.hotspot_view = Some(new_view);
@@ -904,6 +904,7 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
                 .block(
                     Block::default()
                         .borders(Borders::ALL)
+                        .border_type(BorderType::Plain)
                         .border_style(Style::new().fg(CRITICAL_RED)),
                 );
                 f.render_widget(header, outer_layout[0]);
@@ -989,6 +990,7 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
                 let status = Paragraph::new(vec![status_line]).block(
                     Block::default()
                         .borders(Borders::ALL)
+                        .border_type(BorderType::Plain)
                         .border_style(Style::default().fg(HUD_GREEN)),
                 );
                 f.render_widget(status, outer_layout[2]);

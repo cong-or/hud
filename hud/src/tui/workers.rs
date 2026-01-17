@@ -2,12 +2,12 @@ use ratatui::{
     layout::Rect,
     style::Style,
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{block::BorderType, Block, Borders, Paragraph},
     Frame,
 };
 use std::collections::HashMap;
 
-use super::theme::{gauge_bar, CAUTION_AMBER, HUD_GREEN};
+use super::theme::{gauge_bar, CAUTION_AMBER, HUD_CYAN, HUD_GREEN};
 use super::TraceData;
 
 /// Workers panel - tactical thread load display
@@ -52,7 +52,7 @@ impl WorkersPanel {
                 let bar_color = if percentage > 50.0 { CAUTION_AMBER } else { HUD_GREEN };
 
                 lines.push(Line::from(vec![
-                    Span::styled(format!("W{worker_id} "), Style::default().fg(bar_color)),
+                    Span::styled(format!("W{worker_id} "), Style::default().fg(HUD_CYAN)),
                     Span::styled(gauge_bar(percentage, 10), Style::default().fg(bar_color)),
                     Span::styled(format!(" {percentage:>3.0}%"), Style::default().fg(bar_color)),
                 ]));
@@ -62,7 +62,8 @@ impl WorkersPanel {
         let paragraph = Paragraph::new(lines).block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Workers")
+                .border_type(BorderType::Plain)
+                .title("[ WORKERS ]")
                 .border_style(Style::default().fg(HUD_GREEN)),
         );
 

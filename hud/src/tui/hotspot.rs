@@ -2,12 +2,11 @@ use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{block::BorderType, Block, Borders, Paragraph},
     Frame,
 };
-use std::collections::HashMap;
 
-use super::theme::{severity_marker, CAUTION_AMBER, HUD_GREEN, INFO_DIM, SEL_CURSOR};
+use super::theme::{severity_marker, CAUTION_AMBER, HUD_GREEN, INFO_DIM, SEL_LEFT, SEL_RIGHT};
 use crate::analysis::{analyze_hotspots, FunctionHotspot};
 use crate::trace_data::TraceData;
 
@@ -56,49 +55,6 @@ fn filter_by_name(hotspots: &[FunctionHotspot], query: &str) -> Vec<FunctionHots
 
     let query_lower = query.to_lowercase();
     hotspots.iter().filter(|h| h.name.to_lowercase().contains(&query_lower)).cloned().collect()
-}
-
-/// Rebuild hotspots from events filtered by worker IDs
-fn rebuild_hotspots_for_workers(data: &TraceData, worker_ids: &[u32]) -> Vec<FunctionHotspot> {
-    use std::collections::HashSet;
-
-    let worker_set: HashSet<u32> = worker_ids.iter().copied().collect();
-
-    // Single pass: aggregate function data and count samples
-    // Filter out "execution" events (scheduler/idle time)
-    let (function_data, total_samples) = data
-        .events
-        .iter()
-        .filter(|event| worker_set.contains(&event.worker_id) && event.name != "execution")
-        .fold((HashMap::new(), 0usize), |(mut acc, count), event| {
-            let entry = acc
-                .entry(event.name.clone())
-                .or_insert_with(|| (HashMap::new(), event.file.clone(), event.line));
-            *entry.0.entry(event.worker_id).or_insert(0) += 1;
-            (acc, count + 1)
-        });
-    let mut hotspots: Vec<FunctionHotspot> = function_data
-        .into_iter()
-        .map(|(name, (workers, file, line))| {
-            let count: usize = workers.values().sum();
-            let percentage =
-                if total_samples > 0 { (count as f64 / total_samples as f64) * 100.0 } else { 0.0 };
-            FunctionHotspot {
-                name,
-                count,
-                percentage,
-                workers,
-                file,
-                line,
-                call_stacks: Vec::new(),
-            }
-        })
-        .collect();
-
-    // Sort by count (descending) - unstable sort is faster
-    hotspots.sort_unstable_by_key(|h| std::cmp::Reverse(h.count));
-
-    hotspots
 }
 
 // UI Component
@@ -185,19 +141,6 @@ impl HotspotView {
         self.filter_active
     }
 
-    pub fn filter_by_workers(&mut self, worker_ids: &[u32], data: &TraceData) {
-        if worker_ids.len() == data.workers.len() {
-            // All workers selected, no filtering needed
-            self.clear_filter();
-            return;
-        }
-
-        self.hotspots = rebuild_hotspots_for_workers(data, worker_ids);
-        self.filter_active = true;
-        self.selected_index = 0;
-        self.scroll_offset = 0;
-    }
-
     pub fn render(&self, f: &mut Frame, area: Rect, data: &TraceData) {
         let mut lines = vec![];
 
@@ -229,8 +172,8 @@ impl HotspotView {
                 hotspot.name.clone()
             };
 
-            // Selection cursor
-            let cursor = if is_selected { SEL_CURSOR } else { "   " };
+            // Selection brackets
+            let (sel_l, sel_r) = if is_selected { (SEL_LEFT, SEL_RIGHT) } else { (" ", " ") };
             let name_style = if is_selected {
                 Style::default()
                     .fg(severity_color)
@@ -239,10 +182,9 @@ impl HotspotView {
                 Style::default().fg(severity_color)
             };
 
-            // Line 1: cursor + marker + name + percentage
+            // Line 1: <marker name percentage>
             lines.push(Line::from(vec![
-                Span::styled(cursor, Style::default().fg(CAUTION_AMBER)),
-                Span::raw(" "),
+                Span::styled(sel_l, Style::default().fg(CAUTION_AMBER)),
                 Span::styled(marker, Style::default().fg(severity_color)),
                 Span::raw(" "),
                 Span::styled(display_name, name_style),
@@ -250,6 +192,7 @@ impl HotspotView {
                     format!(" {:>5.1}%", hotspot.percentage),
                     Style::default().fg(severity_color),
                 ),
+                Span::styled(sel_r, Style::default().fg(CAUTION_AMBER)),
             ]));
 
             // Line 2: location (if available) or sample count
@@ -273,18 +216,17 @@ impl HotspotView {
         // Format duration for title
         let duration_str = format_duration_human(data.duration);
         let title = if self.filter_active {
-            format!(
-                "Hotspots ({duration_str}) [{}/{}]",
-                self.hotspots.len(),
-                self.all_hotspots.len()
-            )
+            let shown = self.hotspots.len();
+            let total = self.all_hotspots.len();
+            format!("[ HOTSPOTS {duration_str} {shown}/{total} ]")
         } else {
-            format!("Hotspots ({duration_str})")
+            format!("[ HOTSPOTS {duration_str} ]")
         };
 
         let paragraph = Paragraph::new(lines).block(
             Block::default()
                 .borders(Borders::ALL)
+                .border_type(BorderType::Plain)
                 .title(title)
                 .border_style(Style::default().fg(HUD_GREEN)),
         );
