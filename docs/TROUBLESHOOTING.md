@@ -8,16 +8,41 @@ ps -T -p <PID> | grep tokio        # Verify Tokio workers exist
 readlink -f /proc/<PID>/exe        # Get actual binary path
 ```
 
-## No Function Names
+## No Function Names / Low Debug %
 
-Functions show as `<unknown>` or hex addresses.
+Functions show as `<unknown>` or hex addresses. The **Debug %** indicator in the status panel shows amber (below 50%).
 
-**Fix:** Add debug symbols to target's `Cargo.toml`:
+### What's happening
+
+hud uses DWARF debug symbols to translate memory addresses into function names and source locations. Without debug symbols:
+- Function names fall back to prefix-based guessing (`tokio::`, `std::`, etc.)
+- Source file and line numbers are unavailable
+- Frames show ⚠ in the drilldown view
+
+### Fix
+
+Add debug symbols to target's `Cargo.toml`:
 ```toml
 [profile.release]
 debug = true
 force-frame-pointers = true
 ```
+
+Then rebuild your application. The Debug % should rise to 80-100%.
+
+### Understanding the indicators
+
+| Indicator | Meaning |
+|-----------|---------|
+| **Debug 100%** (green) | All frames have debug info - reliable classification |
+| **Debug <50%** (amber) | Most frames lack debug info - rebuild with `debug = true` |
+| **⚠ marker** | This specific frame is missing debug info |
+
+### Still seeing low Debug %?
+
+- Binary was stripped: Don't run `strip` on the binary
+- Wrong binary path: Use `--target /path/to/binary` to specify the exact binary with symbols
+- Shared libraries: System libraries won't have debug info (expected)
 
 ## Permission Denied
 

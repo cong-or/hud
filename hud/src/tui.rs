@@ -135,7 +135,7 @@ enum ViewMode {
 
 /// Render the help overlay explaining hud concepts and keyboard shortcuts
 fn render_help_overlay(f: &mut ratatui::Frame, area: Rect) {
-    let popup_area = centered_popup(area, 80, 32);
+    let popup_area = centered_popup(area, 80, 34);
 
     let help_text = vec![
         Line::from(""),
@@ -168,15 +168,21 @@ fn render_help_overlay(f: &mut ratatui::Frame, area: Rect) {
             Span::styled("When blocking happened. Spikes show bursts of blocking.", STYLE_DIM),
         ]),
         Line::from(""),
-        // Common culprits
-        Line::from(Span::styled("  Common Culprits", STYLE_HEADING)),
+        // Debug info
+        Line::from(Span::styled("  Debug Info", STYLE_HEADING)),
         Line::from(Span::styled(
-            "  • bcrypt/argon2 — password hashing (use spawn_blocking)",
+            "  hud needs debug symbols to show function names and source locations.",
             STYLE_DIM,
         )),
-        Line::from(Span::styled("  • std::fs — sync file I/O (use tokio::fs)", STYLE_DIM)),
-        Line::from(Span::styled("  • DNS lookup — std::net blocks (use tokio::net)", STYLE_DIM)),
-        Line::from(Span::styled("  • compression — flate2/zstd (use spawn_blocking)", STYLE_DIM)),
+        Line::from(Span::styled(
+            "  The Debug % in status shows how many frames have this info.",
+            STYLE_DIM,
+        )),
+        Line::from(Span::styled(
+            "  If low, rebuild with: [profile.release] debug = true",
+            STYLE_DIM,
+        )),
+        Line::from(Span::styled("  Frames marked ⚠ in drilldown are missing symbols.", STYLE_DIM)),
         Line::from(""),
         // Keys
         Line::from(Span::styled("  Keys", STYLE_HEADING)),
