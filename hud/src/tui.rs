@@ -235,8 +235,10 @@ fn render_help_overlay(f: &mut ratatui::Frame, area: Rect) {
             Span::styled(" Quit", STYLE_TEXT),
         ]),
         Line::from(vec![
-            Span::styled("  Y", STYLE_KEY),
-            Span::styled(" Yank (in drilldown) — copy call stack to clipboard", STYLE_DIM),
+            Span::styled("  G", STYLE_KEY),
+            Span::styled(" Toggle view (functions ↔ files)   ", STYLE_DIM),
+            Span::styled("Y", STYLE_KEY),
+            Span::styled(" Yank (in drilldown)", STYLE_DIM),
         ]),
         Line::from(""),
         Line::from(Span::styled("  Press any key to close", STYLE_DIM)),
@@ -794,6 +796,11 @@ impl LiveApp {
                     }
                 }
                 KeyCode::Char('?') => self.view_mode = ViewMode::Help,
+                KeyCode::Char('g' | 'G') => {
+                    if let Some(hv) = &mut self.hotspot_view {
+                        hv.toggle_view();
+                    }
+                }
                 _ => {}
             },
             // Search overlay - text input for filtering
@@ -1129,6 +1136,8 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
                                 Span::styled(":Quit ", STYLE_DIM),
                                 Span::styled("Enter", STYLE_KEY),
                                 Span::styled(":Detail ", STYLE_DIM),
+                                Span::styled("G", STYLE_KEY),
+                                Span::styled(":Group ", STYLE_DIM),
                                 Span::styled("/", STYLE_KEY),
                                 Span::styled(":Search ", STYLE_DIM),
                                 Span::styled("?", STYLE_KEY),
