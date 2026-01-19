@@ -296,10 +296,14 @@ fn render_drilldown_overlay(
     f: &mut ratatui::Frame,
     area: Rect,
     hotspot: &crate::analysis::FunctionHotspot,
+    live_percentage: Option<f64>,
 ) {
     if render_size_warning(f, area, "view details") {
         return;
     }
+
+    // Use live percentage if available, otherwise frozen value
+    let percentage = live_percentage.unwrap_or(hotspot.percentage);
 
     // Responsive thresholds based on terminal size
     let is_narrow = area.width < 60;
@@ -340,7 +344,7 @@ fn render_drilldown_overlay(
     let inner_width = popup_area.width.saturating_sub(4) as usize;
 
     // Severity color based on CPU percentage
-    let severity_color = match hotspot.percentage {
+    let severity_color = match percentage {
         p if p > 40.0 => CRITICAL_RED,
         p if p > 20.0 => CAUTION_AMBER,
         _ => HUD_GREEN,
@@ -348,7 +352,7 @@ fn render_drilldown_overlay(
 
     // Build CPU bar - shorter on narrow terminals
     let bar_width = if is_narrow { 10 } else { 20 };
-    let cpu_filled = ((hotspot.percentage / 100.0) * bar_width as f64) as usize;
+    let cpu_filled = ((percentage / 100.0) * bar_width as f64) as usize;
     let cpu_bar = format!(
         "{}{}",
         "█".repeat(cpu_filled.min(bar_width)),
@@ -394,7 +398,7 @@ fn render_drilldown_overlay(
             Span::styled("CPU  ", STYLE_DIM), // CPU utilization gauge
             Span::styled(cpu_bar, Style::new().fg(severity_color)),
             Span::styled(
-                format!(" {:.1}%", hotspot.percentage),
+                format!(" {percentage:.1}%"),
                 Style::new().fg(severity_color).add_modifier(Modifier::BOLD),
             ),
         ]),
@@ -1083,10 +1087,17 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
                     render_help_overlay(f, area);
                 }
 
-                // DrillDown overlay (uses frozen snapshot)
+                // DrillDown overlay (frozen snapshot with live CPU percentage)
                 if app.view_mode == ViewMode::DrillDown {
                     if let Some(ref hotspot) = app.frozen_hotspot {
-                        render_drilldown_overlay(f, area, hotspot);
+                        // Look up live percentage by function name
+                        let live_pct = app.hotspot_view.as_ref().and_then(|hv| {
+                            hv.hotspots
+                                .iter()
+                                .find(|h| h.name == hotspot.name)
+                                .map(|h| h.percentage)
+                        });
+                        render_drilldown_overlay(f, area, hotspot, live_pct);
                     }
                 }
 
