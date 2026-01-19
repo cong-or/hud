@@ -50,6 +50,7 @@ use std::io;
 use std::time::Duration;
 
 pub mod hotspot; // Public for testing
+mod layout;
 mod status;
 mod theme;
 mod timeline;
@@ -865,13 +866,26 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
             let has_events = !trace_data.events.is_empty();
 
             terminal.draw(|f| {
-                let outer_layout = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([
+                // Compute responsive layout based on terminal size
+                let layout_cfg = layout::compute_layout(f.area().width, f.area().height);
+
+                // Build outer layout constraints based on visibility
+                let outer_constraints = if layout_cfg.show_status_bar {
+                    vec![
                         Constraint::Length(3), // Header
                         Constraint::Min(0),    // Main panels
                         Constraint::Length(3), // Status bar
-                    ])
+                    ]
+                } else {
+                    vec![
+                        Constraint::Length(3), // Header
+                        Constraint::Min(0),    // Main panels (no status bar)
+                    ]
+                };
+
+                let outer_layout = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints(outer_constraints)
                     .split(f.area());
 
                 // Header - tactical live display with session info
@@ -909,30 +923,68 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
                 );
                 f.render_widget(header, outer_layout[0]);
 
-                // Main content area
+                // Main content area - layout depends on terminal size
                 let main_area = outer_layout[1];
-                let rows = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-                    .split(main_area);
 
-                let top_cols = Layout::default()
-                    .direction(Direction::Horizontal)
-                    .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
-                    .split(rows[0]);
+                if layout_cfg.single_column {
+                    // Narrow terminals: stack hotspots + timeline vertically
+                    let rows = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+                        .split(main_area);
 
-                let bottom_cols = Layout::default()
-                    .direction(Direction::Horizontal)
-                    .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
-                    .split(rows[1]);
+                    if let Some(ref hv) = app.hotspot_view {
+                        hv.render(f, rows[0], &trace_data);
+                    }
+                    timeline_view.render(f, rows[1], &trace_data);
+                } else if layout_cfg.show_workers_panel {
+                    // Full layout: 2x2 grid
+                    let rows = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+                        .split(main_area);
 
-                // Render panels
-                status_panel.render(f, top_cols[0], &trace_data);
-                if let Some(ref hv) = app.hotspot_view {
-                    hv.render(f, top_cols[1], &trace_data);
+                    let top_cols = Layout::default()
+                        .direction(Direction::Horizontal)
+                        .constraints(layout_cfg.col_constraints())
+                        .split(rows[0]);
+
+                    let bottom_cols = Layout::default()
+                        .direction(Direction::Horizontal)
+                        .constraints(layout_cfg.col_constraints())
+                        .split(rows[1]);
+
+                    if layout_cfg.show_status_panel {
+                        status_panel.render(f, top_cols[0], &trace_data);
+                    }
+                    if let Some(ref hv) = app.hotspot_view {
+                        hv.render(f, top_cols[1], &trace_data);
+                    }
+                    workers_panel.render(f, bottom_cols[0], &trace_data);
+                    timeline_view.render(f, bottom_cols[1], &trace_data);
+                } else {
+                    // Compact/minimal: hotspots + timeline, optionally with status panel
+                    let rows = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+                        .split(main_area);
+
+                    if layout_cfg.show_status_panel {
+                        let top_cols = Layout::default()
+                            .direction(Direction::Horizontal)
+                            .constraints(layout_cfg.col_constraints())
+                            .split(rows[0]);
+
+                        status_panel.render(f, top_cols[0], &trace_data);
+                        if let Some(ref hv) = app.hotspot_view {
+                            hv.render(f, top_cols[1], &trace_data);
+                        }
+                    } else if let Some(ref hv) = app.hotspot_view {
+                        // Minimal: hotspots take full width
+                        hv.render(f, rows[0], &trace_data);
+                    }
+                    timeline_view.render(f, rows[1], &trace_data);
                 }
-                workers_panel.render(f, bottom_cols[0], &trace_data);
-                timeline_view.render(f, bottom_cols[1], &trace_data);
 
                 // Search overlay
                 if app.view_mode == ViewMode::Search {
@@ -951,49 +1003,51 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
                     }
                 }
 
-                // Status bar keybinds - show context-appropriate keys
-                let status_line = match app.view_mode {
-                    ViewMode::DrillDown => Line::from(vec![
-                        Span::styled("ESC", STYLE_KEY),
-                        Span::styled(":Close ", STYLE_DIM),
-                        Span::styled("Y", STYLE_KEY),
-                        Span::styled(":Yank ", STYLE_DIM),
-                        Span::styled("[Detail]", Style::new().fg(CAUTION_AMBER)),
-                    ]),
-                    ViewMode::Search => Line::from(vec![
-                        Span::styled("ESC", STYLE_KEY),
-                        Span::styled(":Cancel ", STYLE_DIM),
-                        Span::styled("Enter", STYLE_KEY),
-                        Span::styled(":Apply ", STYLE_DIM),
-                        Span::styled("[Search]", Style::new().fg(CAUTION_AMBER)),
-                    ]),
-                    _ => {
-                        let mode = if has_events {
-                            Span::styled("[Live]", Style::new().fg(CRITICAL_RED))
-                        } else {
-                            Span::styled("[Waiting]", STYLE_DIM)
-                        };
-                        Line::from(vec![
-                            Span::styled("Q", STYLE_KEY),
-                            Span::styled(":Quit ", STYLE_DIM),
+                // Status bar keybinds - show context-appropriate keys (only if visible)
+                if layout_cfg.show_status_bar {
+                    let status_line = match app.view_mode {
+                        ViewMode::DrillDown => Line::from(vec![
+                            Span::styled("ESC", STYLE_KEY),
+                            Span::styled(":Close ", STYLE_DIM),
+                            Span::styled("Y", STYLE_KEY),
+                            Span::styled(":Yank ", STYLE_DIM),
+                            Span::styled("[Detail]", Style::new().fg(CAUTION_AMBER)),
+                        ]),
+                        ViewMode::Search => Line::from(vec![
+                            Span::styled("ESC", STYLE_KEY),
+                            Span::styled(":Cancel ", STYLE_DIM),
                             Span::styled("Enter", STYLE_KEY),
-                            Span::styled(":Detail ", STYLE_DIM),
-                            Span::styled("/", STYLE_KEY),
-                            Span::styled(":Search ", STYLE_DIM),
-                            Span::styled("?", STYLE_KEY),
-                            Span::styled(":Help ", STYLE_DIM),
-                            mode,
-                        ])
-                    }
-                };
+                            Span::styled(":Apply ", STYLE_DIM),
+                            Span::styled("[Search]", Style::new().fg(CAUTION_AMBER)),
+                        ]),
+                        _ => {
+                            let mode = if has_events {
+                                Span::styled("[Live]", Style::new().fg(CRITICAL_RED))
+                            } else {
+                                Span::styled("[Waiting]", STYLE_DIM)
+                            };
+                            Line::from(vec![
+                                Span::styled("Q", STYLE_KEY),
+                                Span::styled(":Quit ", STYLE_DIM),
+                                Span::styled("Enter", STYLE_KEY),
+                                Span::styled(":Detail ", STYLE_DIM),
+                                Span::styled("/", STYLE_KEY),
+                                Span::styled(":Search ", STYLE_DIM),
+                                Span::styled("?", STYLE_KEY),
+                                Span::styled(":Help ", STYLE_DIM),
+                                mode,
+                            ])
+                        }
+                    };
 
-                let status = Paragraph::new(vec![status_line]).block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_type(BorderType::Plain)
-                        .border_style(Style::default().fg(HUD_GREEN)),
-                );
-                f.render_widget(status, outer_layout[2]);
+                    let status = Paragraph::new(vec![status_line]).block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .border_type(BorderType::Plain)
+                            .border_style(Style::default().fg(HUD_GREEN)),
+                    );
+                    f.render_widget(status, outer_layout[2]);
+                }
             })?;
 
             last_update = std::time::Instant::now();
