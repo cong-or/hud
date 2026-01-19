@@ -136,7 +136,10 @@ enum ViewMode {
 
 /// Render the help overlay explaining hud concepts and keyboard shortcuts
 fn render_help_overlay(f: &mut ratatui::Frame, area: Rect) {
-    let popup_area = centered_popup(area, 80, 34);
+    // Responsive sizing: expand on small terminals, clamp to available space
+    let width_pct = if area.width < 80 { 95 } else { 80 };
+    let height = 34_u16.min(area.height.saturating_sub(2));
+    let popup_area = centered_popup(area, width_pct, height);
 
     let help_text = vec![
         Line::from(""),
@@ -272,9 +275,13 @@ fn render_drilldown_overlay(
     };
     let worker_lines = hotspot.workers.len().min(4) + 1;
     let base_height = 16; // Header + stats + footer
-    let popup_height = (base_height + call_stack_lines + worker_lines).min(45) as u16;
+    let content_height = (base_height + call_stack_lines + worker_lines).min(45) as u16;
 
-    let popup_area = centered_popup(area, 65, popup_height);
+    // Responsive sizing: expand on small terminals, clamp to available space
+    let width_pct = if area.width < 80 { 95 } else { 65 };
+    let popup_height = content_height.min(area.height.saturating_sub(2));
+
+    let popup_area = centered_popup(area, width_pct, popup_height);
     let inner_width = popup_area.width.saturating_sub(4) as usize;
 
     // Severity color based on CPU percentage
