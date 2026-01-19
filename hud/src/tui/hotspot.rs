@@ -35,12 +35,25 @@ pub struct FileGroup {
     pub hotspots: Vec<FunctionHotspot>,
 }
 
-/// Group hotspots by source file
+/// Find the topmost user code file from a hotspot's call stacks
+fn find_user_code_file(hotspot: &FunctionHotspot) -> Option<String> {
+    hotspot
+        .call_stacks
+        .iter()
+        .flat_map(|stack| stack.iter())
+        .find(|frame| frame.origin.is_user_code() && frame.file.is_some())
+        .and_then(|frame| frame.file.clone())
+}
+
+/// Group hotspots by user source file (finds caller, not library code)
 fn group_by_file(hotspots: &[FunctionHotspot]) -> Vec<FileGroup> {
     let mut groups: HashMap<String, Vec<FunctionHotspot>> = HashMap::new();
 
     for h in hotspots {
-        let file = h.file.clone().unwrap_or_else(|| "<unknown>".to_string());
+        // Prefer user code file from call stack, fall back to hotspot's own file
+        let file = find_user_code_file(h)
+            .or_else(|| h.file.clone())
+            .unwrap_or_else(|| "<unknown>".to_string());
         groups.entry(file).or_default().push(h.clone());
     }
 
@@ -202,12 +215,19 @@ impl HotspotView {
 
     /// Toggle between function and file view modes
     pub fn toggle_view(&mut self) {
-        self.view_mode = match self.view_mode {
+        self.set_view_mode(match self.view_mode {
             ViewMode::Functions => ViewMode::Files,
             ViewMode::Files => ViewMode::Functions,
-        };
-        self.selected_index = 0;
-        self.scroll_offset = 0;
+        });
+    }
+
+    /// Set the view mode directly
+    pub fn set_view_mode(&mut self, mode: ViewMode) {
+        if self.view_mode != mode {
+            self.view_mode = mode;
+            self.selected_index = 0;
+            self.scroll_offset = 0;
+        }
     }
 
     /// Get the current view mode

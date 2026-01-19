@@ -853,11 +853,17 @@ impl LiveApp {
     /// - Active search filter query
     fn update_hotspot_view(&mut self) {
         // Capture current state before rebuilding
-        let old_selected = self.hotspot_view.as_ref().map_or(0, |hv| hv.selected_index);
+        let (old_selected, old_view_mode) = self
+            .hotspot_view
+            .as_ref()
+            .map_or((0, hotspot::ViewMode::default()), |hv| (hv.selected_index, hv.view_mode()));
 
         // Get hotspots from HotspotStats (efficient aggregation)
         let hotspots = self.hotspot_stats.to_hotspots();
         let mut new_view = HotspotView::from_hotspots(hotspots);
+
+        // Restore view mode
+        new_view.set_view_mode(old_view_mode);
 
         // Re-apply search filter if active
         if !self.search_query.is_empty() {
