@@ -1,5 +1,35 @@
 # Tuning
 
+## Rolling Window
+
+`--window <secs>` limits the display to events from the last N seconds. Default: 0 (all data).
+
+```bash
+sudo hud my-app --window 30   # show last 30 seconds only
+```
+
+### Why use a window?
+
+Without `--window`, hud accumulates all events since startup. This is useful for finding problems over long sessions, but has a downside: **metrics never decay**. If you generate load for 5 minutes then stop, the hotspot percentages stay frozen at their peak values.
+
+With `--window 30`, only the last 30 seconds of data is shown. When load stops:
+- Old events age out of the window
+- Hotspot percentages naturally decay toward 0
+- The display reflects *current* behavior, not historical
+
+### When to use it
+
+| Scenario | Recommendation |
+|----------|----------------|
+| Interactive debugging | `--window 30` — see real-time response to changes |
+| Before/after comparisons | No window — capture full sessions for comparison |
+| Long-running monitoring | `--window 60` — focus on recent behavior |
+| Initial triage | No window — accumulate data to find patterns |
+
+### Memory note
+
+Window filtering happens at display time, not storage. All events are kept in memory regardless of window size. For very long sessions (hours), memory usage grows linearly with event count.
+
 ## Threshold
 
 `--threshold <ms>` sets the minimum off-CPU duration before hud reports a blocking event. Default: 5ms.

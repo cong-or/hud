@@ -199,7 +199,8 @@ async fn run() -> Result<()> {
 
         // Spawn TUI thread
         let tui_pid = Some(pid);
-        let handle = std::thread::spawn(move || tui::run_live(event_rx, tui_pid));
+        let window_secs = args.window;
+        let handle = std::thread::spawn(move || tui::run_live(event_rx, tui_pid, window_secs));
 
         (Some(handle), Some(event_tx))
     };

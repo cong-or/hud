@@ -54,4 +54,8 @@ pub struct Args {
     /// Blocking threshold in milliseconds
     #[arg(long, default_value = "5", value_name = "MS")]
     pub threshold: u64,
+
+    /// Rolling time window in seconds (0 = all data, default)
+    #[arg(long, default_value = "0", value_name = "SECS")]
+    pub window: u64,
 }

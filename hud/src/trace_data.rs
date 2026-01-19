@@ -240,7 +240,7 @@ pub struct TraceData {
 ///
 /// - Adding events: O(1) amortized (`Vec::push`)
 /// - Converting to `TraceData`: O(1) (`Arc::clone`)
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct LiveData {
     /// All events, wrapped in Arc for cheap cloning.
     /// We use `Arc::make_mut` for copy-on-write semantics.
@@ -260,6 +260,24 @@ pub struct LiveData {
 
     /// Timestamp of the most recent event.
     latest_time: Option<f64>,
+
+    /// Wall-clock time when first event was received.
+    /// Used to calculate elapsed time for rolling window.
+    session_start: std::time::Instant,
+}
+
+impl Default for LiveData {
+    fn default() -> Self {
+        Self {
+            events: Arc::new(Vec::new()),
+            workers_set: HashSet::new(),
+            workers: Arc::new(Vec::new()),
+            duration: 0.0,
+            start_time: None,
+            latest_time: None,
+            session_start: std::time::Instant::now(),
+        }
+    }
 }
 
 impl LiveData {
@@ -316,15 +334,52 @@ impl LiveData {
 
     /// Create an immutable snapshot for rendering.
     ///
+    /// # Arguments
+    /// * `window_secs` - Rolling time window. `None` = all data, `Some(n)` = last n seconds.
+    ///
     /// # Performance
     ///
-    /// O(1) - just Arc reference count increments, no data copying.
+    /// - Without windowing: O(1) - just `Arc` reference count increments
+    /// - With windowing: O(log n + k) where k = events in window (binary search + clone slice)
     #[must_use]
-    pub fn as_trace_data(&self) -> TraceData {
+    pub fn as_trace_data(&self, window_secs: Option<f64>) -> TraceData {
+        // Fast path: no windowing or no data yet
+        let Some(window) = window_secs.filter(|&w| w > 0.0) else {
+            return TraceData {
+                events: Arc::clone(&self.events),
+                workers: Arc::clone(&self.workers),
+                duration: self.duration,
+            };
+        };
+
+        let Some(first_event_time) = self.start_time else {
+            return TraceData {
+                events: Arc::clone(&self.events),
+                workers: Arc::clone(&self.workers),
+                duration: self.duration,
+            };
+        };
+
+        // Use wall-clock time to calculate "now" in event-timestamp space.
+        // This ensures the window advances even when no new events arrive.
+        let elapsed = self.session_start.elapsed().as_secs_f64();
+        let now = first_event_time + elapsed;
+        let cutoff = now - window;
+
+        // Events are time-ordered, so binary search for the cutoff point
+        let start_idx = self.events.partition_point(|e| e.timestamp < cutoff);
+
+        // Slice from cutoff to end, clone into new Vec
+        let filtered: Vec<TraceEvent> = self.events[start_idx..].to_vec();
+
+        // Duration is the window size (or less if not enough data yet)
+        let actual_duration =
+            filtered.first().map_or(0.0, |first| (now - first.timestamp).min(window));
+
         TraceData {
-            events: Arc::clone(&self.events),
+            events: Arc::new(filtered),
             workers: Arc::clone(&self.workers),
-            duration: self.duration,
+            duration: actual_duration,
         }
     }
 }

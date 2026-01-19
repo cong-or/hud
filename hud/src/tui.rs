@@ -964,10 +964,13 @@ struct LiveApp {
     frozen_file_group: Option<hotspot::FileGroup>,
     /// Selected index within file drilldown's function list
     file_drilldown_selected: usize,
+
+    /// Rolling time window in seconds. None = show all data, Some(n) = show last n seconds.
+    window_secs: Option<f64>,
 }
 
 impl LiveApp {
-    fn new() -> Self {
+    fn new(window_secs: Option<f64>) -> Self {
         Self {
             live_data: LiveData::new(),
             hotspot_stats: crate::analysis::HotspotStats::new(),
@@ -978,6 +981,7 @@ impl LiveApp {
             frozen_hotspot: None,
             frozen_file_group: None,
             file_drilldown_selected: 0,
+            window_secs,
         }
     }
 
@@ -1116,18 +1120,26 @@ impl LiveApp {
     /// for a smooth live experience - without state preservation, selection
     /// would jump around as rankings change.
     ///
+    /// # Arguments
+    /// * `trace_data` - The (possibly filtered) trace data snapshot
+    ///
     /// # State Preserved
     /// - `selected_index` - Cursor position in hotspot list
     /// - Active search filter query
-    fn update_hotspot_view(&mut self) {
+    fn update_hotspot_view(&mut self, trace_data: &TraceData) {
         // Capture current state before rebuilding
         let (old_selected, old_view_mode) = self
             .hotspot_view
             .as_ref()
             .map_or((0, hotspot::ViewMode::default()), |hv| (hv.selected_index, hv.view_mode()));
 
-        // Get hotspots from HotspotStats (efficient aggregation)
-        let hotspots = self.hotspot_stats.to_hotspots();
+        // When windowing is enabled, compute hotspots from filtered trace data.
+        // Without windowing, use the efficient streaming aggregator (HotspotStats).
+        let hotspots = if self.window_secs.is_some() {
+            crate::analysis::analyze_hotspots(trace_data)
+        } else {
+            self.hotspot_stats.to_hotspots()
+        };
         let mut new_view = HotspotView::from_hotspots(hotspots);
 
         // Restore view mode
@@ -1163,10 +1175,11 @@ impl LiveApp {
 /// # Arguments
 /// * `event_rx` - Channel receiving trace events from eBPF
 /// * `pid` - Process ID being profiled (for display)
+/// * `window_secs` - Rolling time window in seconds (0 = show all data)
 ///
 /// # Errors
 /// Returns an error if terminal setup or rendering fails
-pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> {
+pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>, window_secs: u64) -> Result<()> {
     // -------------------------------------------------------------------------
     // Terminal Setup
     // -------------------------------------------------------------------------
@@ -1179,7 +1192,9 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
     // -------------------------------------------------------------------------
     // Application State
     // -------------------------------------------------------------------------
-    let mut app = LiveApp::new();
+    // Convert window_secs: 0 = None (show all data), N = Some(N.0) (last N seconds)
+    let window = if window_secs > 0 { Some(window_secs as f64) } else { None };
+    let mut app = LiveApp::new(window);
     let mut last_update = std::time::Instant::now();
 
     // 10 Hz refresh rate balances responsiveness with CPU usage.
@@ -1197,13 +1212,13 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
             app.live_data.add_event(event);
         }
 
-        // Snapshot current data for rendering
-        let trace_data = app.live_data.as_trace_data();
+        // Snapshot current data for rendering (filtered by window if set)
+        let trace_data = app.live_data.as_trace_data(app.window_secs);
 
         // Redraw periodically
         if last_update.elapsed() >= UPDATE_INTERVAL {
-            // Rebuild hotspot view from aggregated stats (preserves selection)
-            app.update_hotspot_view();
+            // Rebuild hotspot view from trace data (preserves selection)
+            app.update_hotspot_view(&trace_data);
 
             let status_panel = StatusPanel::new(&trace_data);
             let workers_panel = WorkersPanel::new(&trace_data);

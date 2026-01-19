@@ -69,6 +69,9 @@ sudo hud --pid 1234
 sudo hud my-app --threshold 10   # less sensitive
 sudo hud my-app --threshold 1    # more sensitive
 
+# Rolling time window (only show last N seconds)
+sudo hud my-app --window 30      # metrics decay when load stops
+
 # Headless mode (CI/scripting)
 sudo hud my-app --export trace.json --headless --duration 60
 ```
@@ -80,7 +83,7 @@ See [Tuning](docs/TUNING.md) for threshold selection guide.
 Try hud with the included demo server (requires Option B):
 
 ```bash
-# Build demo server (debug build preserves function names)
+# Build demo server - MUST be debug build (release inlines functions)
 cargo build --example demo-server
 ./target/debug/examples/demo-server &
 
@@ -91,9 +94,9 @@ sudo ./target/release/hud demo-server
 ./hud/examples/load.sh
 ```
 
-The demo server has intentionally blocking endpoints (`/hash`, `/compress`, `/read`, `/dns`). You'll see `bcrypt` and `blowfish` hotspots from the `/hash` endpoint.
+The demo server has intentionally blocking endpoints (`/hash`, `/compress`, `/read`, `/dns`). You'll see `bcrypt` and `blowfish` hotspots from the `/hash` endpoint, with `demo-server.rs` highlighted as the entry point in call traces.
 
-> **Tip**: Use debug builds for best results—release builds inline functions and hide your code. See [Troubleshooting](docs/TROUBLESHOOTING.md) if you see low Debug % in the status panel.
+> **Important**: The demo-server **must** be a debug build. Release builds aggressively inline functions, hiding your code from stack traces. If you don't see `demo-server.rs` in drilldowns, rebuild without `--release`.
 
 Press `Q` to quit hud.
 
