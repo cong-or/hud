@@ -16,7 +16,7 @@ sudo hud my-app --headless --export trace.json --duration 60
 |------|----------|-------------|
 | `--headless` | Yes | No TUI, runs silently until complete |
 | `--export <file>` | Yes* | Output file for trace data (required with `--headless`) |
-| `--duration <secs>` | No | Stop after N seconds. Default: 0 (unlimited, run until Ctrl+C) |
+| `--duration <secs>` | No | Stop after N seconds. Omit to run until Ctrl+C |
 | `--threshold <ms>` | No | Blocking threshold. Default: 5ms |
 | `--window <secs>` | No | Rolling window (usually not needed for exports) |
 
@@ -32,8 +32,8 @@ sudo hud my-app --headless --export trace.json --duration 300
 # Extended soak test (1 hour)
 sudo hud my-app --headless --export trace.json --duration 3600
 
-# Run until manually stopped (Ctrl+C)
-sudo hud my-app --headless --export trace.json --duration 0
+# Run indefinitely until Ctrl+C (--duration 0 is default, can omit)
+sudo hud my-app --headless --export trace.json
 ```
 
 ### CI pipeline example
