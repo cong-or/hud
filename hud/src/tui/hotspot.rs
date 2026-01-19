@@ -1,3 +1,35 @@
+//! Hotspot panel - displays functions ranked by blocking time.
+//!
+//! # Architecture
+//!
+//! This module renders the main hotspot list in the TUI. It supports two view modes:
+//! - **Functions view**: Individual functions ranked by CPU% (default)
+//! - **Files view**: Functions grouped by source file (toggle with 'G' key)
+//!
+//! # Data Flow
+//!
+//! ```text
+//! TraceData → analyze_hotspots() → FunctionHotspot[] → HotspotView → render()
+//!                                         ↓
+//!                                  group_by_file() → FileGroup[]
+//! ```
+//!
+//! # Key Types
+//!
+//! - [`HotspotView`] - Main UI component, holds state (selection, scroll, filter)
+//! - [`FunctionHotspot`] - Single function with stats (from analysis module)
+//! - [`FileGroup`] - Aggregated stats for all hotspots in one source file
+//!
+//! # Rendering Pattern
+//!
+//! Each item takes 2 lines:
+//! ```text
+//! Line 1: [marker] function_name     42.3%
+//! Line 2:          filename:line
+//! ```
+//!
+//! The marker indicates severity: `[-]` green, `[!]` amber, `[X]` red
+
 use std::collections::HashMap;
 
 use ratatui::{
@@ -36,7 +68,14 @@ pub struct FileGroup {
     pub hotspots: Vec<FunctionHotspot>,
 }
 
-/// Find the topmost user code file from a hotspot's call stacks
+/// Find the topmost user code file from a hotspot's call stacks.
+///
+/// When grouping by file, we want to attribute blocking to the USER's code,
+/// not the library where blocking actually occurs. For example, if user code
+/// calls `serde_json::to_string()` which blocks, we want to group by the
+/// user's file, not `serde_json`'s source.
+///
+/// This walks the call stack looking for the first frame marked as user code.
 fn find_user_code_file(hotspot: &FunctionHotspot) -> Option<String> {
     hotspot
         .call_stacks
@@ -140,16 +179,39 @@ fn filter_by_name(hotspots: &[FunctionHotspot], query: &str) -> Vec<FunctionHots
     }
 }
 
-// UI Component
+// =============================================================================
+// UI COMPONENT
+// =============================================================================
 
-/// Hotspot view showing top functions by sample count
+/// Hotspot view showing top functions by sample count.
+///
+/// # State Management
+///
+/// This component maintains its own UI state separate from the data:
+/// - `selected_index` - Currently highlighted item (preserved across data updates)
+/// - `scroll_offset` - First visible item (for scrolling long lists)
+/// - `filter_active` - Whether search filter is applied
+/// - `view_mode` - Functions vs Files grouping
+///
+/// # Live Updates
+///
+/// During live profiling, the parent rebuilds this view frequently with new data.
+/// To preserve user's position, we keep `all_hotspots` separate from `hotspots`
+/// (filtered list), and restore `selected_index` after rebuild.
 pub struct HotspotView {
+    /// First visible item index (for virtual scrolling)
     scroll_offset: usize,
-    pub selected_index: usize,          // Public for testing
+    /// Currently selected item (highlighted with < > brackets)
+    pub selected_index: usize, // Public for testing
+    /// Filtered/displayed hotspots (may be subset of `all_hotspots`)
     pub hotspots: Vec<FunctionHotspot>, // Public for testing
-    all_hotspots: Vec<FunctionHotspot>, // Unfiltered list
+    /// Complete unfiltered list (for filter reset)
+    all_hotspots: Vec<FunctionHotspot>,
+    /// True when search filter is active
     filter_active: bool,
+    /// Current display mode (functions or files)
     view_mode: ViewMode,
+    /// Pre-computed file groupings (rebuilt when hotspots change)
     file_groups: Vec<FileGroup>,
 }
 

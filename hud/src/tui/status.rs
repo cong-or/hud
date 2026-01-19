@@ -1,3 +1,35 @@
+//! Status panel - system health overview at a glance.
+//!
+//! # What This Shows
+//!
+//! A compact summary panel showing overall system health:
+//!
+//! ```text
+//! [ STATUS ]
+//!  [!] CAUTION          <- Blinks amber if issues detected
+//!
+//!  Events  1234         <- Total samples captured
+//!  Workers 4            <- Number of Tokio worker threads
+//!  Debug   85%          <- % of frames with debug info
+//!
+//!  Hottest W2           <- Worker with most blocking
+//!  [||||      ] 45%     <- Its blocking percentage
+//! ```
+//!
+//! # Warning Conditions
+//!
+//! The status shows CAUTION (amber, blinking) when either:
+//! - Any worker has > 50% blocking (significant performance issue)
+//! - Debug info coverage < 50% (can't properly identify hotspots)
+//!
+//! Otherwise shows NOMINAL (green).
+//!
+//! # Debug Info Coverage
+//!
+//! This percentage shows how many stack frames had source file information.
+//! Low coverage means the binary was compiled without debug symbols.
+//! Fix with: `[profile.release] debug = true` in Cargo.toml
+
 use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
@@ -14,13 +46,22 @@ use super::theme::{
 use super::TraceData;
 use crate::classification::diagnostics;
 
-/// Master Status panel - tactical system overview
+/// Master Status panel - tactical system overview.
+///
+/// Aggregates key metrics into a single at-a-glance panel.
+/// Border color changes to amber when warnings are present.
 pub struct StatusPanel {
+    /// True if any warning condition is active
     has_warnings: bool,
+    /// Worker with highest blocking %, if any (`worker_id`, percentage)
     busiest_worker: Option<(u32, f64)>,
+    /// Total samples captured
     total_events: usize,
+    /// Number of unique worker threads seen
     worker_count: usize,
+    /// Percentage of frames with debug info (0-100)
     debug_info_coverage: f64,
+    /// True if debug coverage < 50%
     low_debug_coverage: bool,
 }
 

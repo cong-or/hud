@@ -1,3 +1,30 @@
+//! Activity panel - detailed per-worker statistics with thread IDs.
+//!
+//! # What This Shows
+//!
+//! A tabular view of each worker thread with more detail than the Workers panel:
+//!
+//! ```text
+//! [ ACTIVITY ]
+//! Duration 45.2s  Events 1234
+//! ID  TID      Samples  Load
+//! W0  12345    100/250  [||||      ] 40%
+//! W1  12346     50/250  [||        ] 20%
+//! ```
+//!
+//! # Columns
+//!
+//! - **ID**: Worker ID (W0, W1, W2...) assigned by Tokio
+//! - **TID**: OS thread ID (useful for correlating with `htop`, `perf`, etc.)
+//! - **Samples**: blocking/total samples for this worker
+//! - **Load**: Visual gauge + percentage of blocking time
+//!
+//! # Color Thresholds
+//!
+//! - Green (< 20%): Healthy, mostly yielding
+//! - Amber (20-50%): Some blocking, worth investigating
+//! - Red (> 50%): Significant blocking, needs attention
+
 use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
@@ -12,15 +39,20 @@ use super::theme::{
 };
 use super::TraceData;
 
-/// Timeline view - tactical activity display showing per-worker statistics
+/// Timeline view - detailed per-worker statistics with OS thread IDs.
 pub struct TimelineView {
+    /// Per-worker statistics, keyed by worker ID
     worker_stats: HashMap<u32, WorkerStats>,
 }
 
+/// Detailed statistics for a single worker thread.
 #[derive(Debug, Clone)]
 struct WorkerStats {
+    /// Total samples captured for this worker
     total_samples: usize,
+    /// Samples with actual blocking function names
     samples_with_functions: usize,
+    /// OS thread ID (from /proc or gettid)
     tid: u32,
 }
 
