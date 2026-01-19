@@ -20,17 +20,7 @@ Watches the Linux scheduler via eBPF. When a worker thread stays on CPU too long
 
 ## Why hud?
 
-| Feature | hud | tokio-console | tokio-blocked |
-|---------|:---:|:-------------:|:-------------:|
-| No code changes | ✓ | ✗ | ✗ |
-| Attach to running process | ✓ | ✗ | ✗ |
-| No recompilation | ✓ | ✗ | ✗ |
-| Production-safe | ✓ | ⚠ | ⚠ |
-
-- **[tokio-console](https://github.com/tokio-rs/console)** requires instrumenting your code with `console-subscriber`
-- **[tokio-blocked](https://github.com/theduke/tokio-blocked)** requires rebuilding with `RUSTFLAGS="--cfg tokio_unstable"`
-
-hud attaches to any running Tokio process. No instrumentation, no unstable features, no restart.
+Unlike [tokio-console](https://github.com/tokio-rs/console) or [tokio-blocked](https://github.com/theduke/tokio-blocked), hud requires no code changes—attach to any running Tokio process.
 
 ## Requirements
 
