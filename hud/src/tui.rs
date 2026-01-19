@@ -134,8 +134,42 @@ enum ViewMode {
 //
 // Standalone functions for rendering modal overlays (help, drilldown, search).
 
+/// Minimum terminal size for overlay content.
+const MIN_OVERLAY_WIDTH: u16 = 50;
+const MIN_OVERLAY_HEIGHT: u16 = 15;
+
+/// Render a "terminal too small" message if below minimum size.
+/// Returns true if message was rendered (caller should return early).
+fn render_size_warning(f: &mut ratatui::Frame, area: Rect, context: &str) -> bool {
+    if area.width >= MIN_OVERLAY_WIDTH && area.height >= MIN_OVERLAY_HEIGHT {
+        return false;
+    }
+
+    let popup_area = centered_popup(area, 90, 5);
+    let msg = Paragraph::new(vec![
+        Line::from(""),
+        Line::from(Span::styled("Terminal too small", Style::new().fg(CAUTION_AMBER))),
+        Line::from(Span::styled(format!("Increase window size to {context}"), STYLE_DIM)),
+    ])
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Plain)
+            .style(Style::new().fg(HUD_GREEN)),
+    )
+    .alignment(ratatui::layout::Alignment::Center);
+
+    f.render_widget(ratatui::widgets::Clear, popup_area);
+    f.render_widget(msg, popup_area);
+    true
+}
+
 /// Render the help overlay explaining hud concepts and keyboard shortcuts
 fn render_help_overlay(f: &mut ratatui::Frame, area: Rect) {
+    if render_size_warning(f, area, "view help") {
+        return;
+    }
+
     // Responsive sizing: expand on small terminals, clamp to available space
     let width_pct = if area.width < 80 { 95 } else { 80 };
     let height = 34_u16.min(area.height.saturating_sub(2));
@@ -263,6 +297,10 @@ fn render_drilldown_overlay(
     area: Rect,
     hotspot: &crate::analysis::FunctionHotspot,
 ) {
+    if render_size_warning(f, area, "view details") {
+        return;
+    }
+
     // Responsive thresholds based on terminal size
     let is_narrow = area.width < 60;
     let is_compact = area.height < 30 || is_narrow;
