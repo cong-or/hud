@@ -8,10 +8,6 @@ Find what's blocking your Tokio runtime. Zero-instrumentation eBPF profiler.
 
 > **Linux only.** This tool uses eBPF, which is a Linux kernel feature. It does not work on macOS or Windows.
 
-```bash
-sudo ./hud my-server
-```
-
 ## The Problem
 
 Tokio uses cooperative scheduling. Tasks yield at `.await` points, trusting that work between awaits is fast. When it isn't—CPU-heavy code, sync I/O, blocking locks—one task starves the rest.

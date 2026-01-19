@@ -263,22 +263,39 @@ fn render_drilldown_overlay(
     area: Rect,
     hotspot: &crate::analysis::FunctionHotspot,
 ) {
-    // Calculate popup height based on content
-    // MAX_FRAMES is 12 but smart selection may show more if there's user code deep in the stack
-    const DISPLAY_MAX_FRAMES: usize = 15;
+    // Responsive thresholds based on terminal size
+    let is_narrow = area.width < 60;
+    let is_compact = area.height < 30 || is_narrow;
+    let is_minimal = area.height < 20;
+
+    // Adjust content based on available space
+    let max_frames = if is_minimal {
+        4
+    } else if is_compact {
+        8
+    } else {
+        12
+    };
+    let show_workers = !is_minimal && !hotspot.workers.is_empty();
+
     let has_call_stack = !hotspot.call_stacks.is_empty();
     let call_stack_lines = if has_call_stack {
-        hotspot.call_stacks.first().map_or(0, |s| s.len().min(DISPLAY_MAX_FRAMES)) + 3
-    // header + frames + "N of M" + spacing
+        hotspot.call_stacks.first().map_or(0, |s| s.len().min(max_frames)) + 2
     } else {
         0
     };
-    let worker_lines = hotspot.workers.len().min(4) + 1;
-    let base_height = 16; // Header + stats + footer
+    let worker_lines = if show_workers { hotspot.workers.len().min(4) + 1 } else { 0 };
+    let base_height = if is_compact { 12 } else { 16 };
     let content_height = (base_height + call_stack_lines + worker_lines).min(45) as u16;
 
     // Responsive sizing: expand on small terminals, clamp to available space
-    let width_pct = if area.width < 80 { 95 } else { 65 };
+    let width_pct = if is_narrow {
+        98
+    } else if area.width < 80 {
+        95
+    } else {
+        65
+    };
     let popup_height = content_height.min(area.height.saturating_sub(2));
 
     let popup_area = centered_popup(area, width_pct, popup_height);
@@ -291,13 +308,13 @@ fn render_drilldown_overlay(
         _ => HUD_GREEN,
     };
 
-    // Build CPU bar
-    const BAR_WIDTH: usize = 20;
-    let cpu_filled = ((hotspot.percentage / 100.0) * BAR_WIDTH as f64) as usize;
+    // Build CPU bar - shorter on narrow terminals
+    let bar_width = if is_narrow { 10 } else { 20 };
+    let cpu_filled = ((hotspot.percentage / 100.0) * bar_width as f64) as usize;
     let cpu_bar = format!(
         "{}{}",
-        "█".repeat(cpu_filled.min(BAR_WIDTH)),
-        "░".repeat(BAR_WIDTH.saturating_sub(cpu_filled))
+        "█".repeat(cpu_filled.min(bar_width)),
+        "░".repeat(bar_width.saturating_sub(cpu_filled))
     );
 
     // Truncate function name to fit
@@ -358,8 +375,6 @@ fn render_drilldown_overlay(
     ];
 
     // Call trace section - inverted to show: your_code → library → blocking_fn
-    const MAX_FRAMES: usize = 12;
-
     if let Some(call_stack) = hotspot.call_stacks.first() {
         lines.push(Line::from(Span::styled("  CALL TRACE", STYLE_DIM)));
 
@@ -367,7 +382,7 @@ fn render_drilldown_overlay(
         let all_frames: Vec<_> = call_stack.iter().rev().collect();
 
         // Smart frame selection: always include user frames + context
-        let frames: Vec<_> = select_frames_for_display(&all_frames, MAX_FRAMES);
+        let frames: Vec<_> = select_frames_for_display(&all_frames, max_frames);
         let frames_shown = frames.len();
         let last_idx = frames_shown.saturating_sub(1);
 
@@ -453,8 +468,8 @@ fn render_drilldown_overlay(
         lines.push(Line::from(""));
     }
 
-    // Worker breakdown with tactical styling
-    if !hotspot.workers.is_empty() {
+    // Worker breakdown with tactical styling (hidden on minimal terminals)
+    if show_workers {
         lines.push(Line::from(Span::styled("  WORKER DISTRIBUTION", STYLE_DIM)));
 
         let mut worker_list: Vec<_> = hotspot.workers.iter().collect();
