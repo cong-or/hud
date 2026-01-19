@@ -135,8 +135,8 @@ enum ViewMode {
 // Standalone functions for rendering modal overlays (help, drilldown, search).
 
 /// Minimum terminal size for overlay content.
-const MIN_OVERLAY_WIDTH: u16 = 50;
-const MIN_OVERLAY_HEIGHT: u16 = 15;
+const MIN_OVERLAY_WIDTH: u16 = 80;
+const MIN_OVERLAY_HEIGHT: u16 = 24;
 
 /// Render a "terminal too small" message if below minimum size.
 /// Returns true if message was rendered (caller should return early).
@@ -926,8 +926,35 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
             let has_events = !trace_data.events.is_empty();
 
             terminal.draw(|f| {
+                let area = f.area();
+
+                // Show message if terminal is too small
+                if area.width < layout::MIN_WIDTH || area.height < layout::MIN_HEIGHT {
+                    let msg = Paragraph::new(vec![
+                        Line::from(""),
+                        Line::from(Span::styled(
+                            "Terminal too small",
+                            Style::new().fg(CAUTION_AMBER),
+                        )),
+                        Line::from(Span::styled(
+                            format!("Minimum size: {}x{}", layout::MIN_WIDTH, layout::MIN_HEIGHT),
+                            STYLE_DIM,
+                        )),
+                        Line::from(Span::styled("Increase window size to continue", STYLE_DIM)),
+                    ])
+                    .alignment(ratatui::layout::Alignment::Center)
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .border_type(BorderType::Plain)
+                            .style(Style::new().fg(HUD_GREEN)),
+                    );
+                    f.render_widget(msg, area);
+                    return;
+                }
+
                 // Compute responsive layout based on terminal size
-                let layout_cfg = layout::compute_layout(f.area().width, f.area().height);
+                let layout_cfg = layout::compute_layout(area.width, area.height);
 
                 // Build outer layout constraints based on visibility
                 let outer_constraints = if layout_cfg.show_status_bar {
@@ -946,7 +973,7 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
                 let outer_layout = Layout::default()
                     .direction(Direction::Vertical)
                     .constraints(outer_constraints)
-                    .split(f.area());
+                    .split(area);
 
                 // Header - tactical live display with session info
                 let pid_display = pid.map_or_else(|| "---".to_string(), |p| p.to_string());
@@ -1048,18 +1075,18 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
 
                 // Search overlay
                 if app.view_mode == ViewMode::Search {
-                    render_search_overlay(f, f.area(), &app.search_query);
+                    render_search_overlay(f, area, &app.search_query);
                 }
 
                 // Help overlay
                 if app.view_mode == ViewMode::Help {
-                    render_help_overlay(f, f.area());
+                    render_help_overlay(f, area);
                 }
 
                 // DrillDown overlay (uses frozen snapshot)
                 if app.view_mode == ViewMode::DrillDown {
                     if let Some(ref hotspot) = app.frozen_hotspot {
-                        render_drilldown_overlay(f, f.area(), hotspot);
+                        render_drilldown_overlay(f, area, hotspot);
                     }
                 }
 

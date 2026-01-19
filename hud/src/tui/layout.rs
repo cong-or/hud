@@ -1,9 +1,13 @@
 //! Responsive layout engine for the TUI.
 //!
 //! Adapts the layout based on terminal dimensions to ensure usability
-//! at various sizes, from minimal (60x12) to full-screen.
+//! at various sizes, from minimal (80x24) to full-screen.
 
 use ratatui::layout::Constraint;
+
+// Minimum usable size - below this show "terminal too small"
+pub const MIN_WIDTH: u16 = 80;
+pub const MIN_HEIGHT: u16 = 24;
 
 // Width breakpoints
 const WIDTH_SINGLE_COLUMN: u16 = 60; // Below this: stack panels vertically
