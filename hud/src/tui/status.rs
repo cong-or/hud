@@ -8,7 +8,9 @@ use ratatui::{
 
 use std::collections::HashMap;
 
-use super::theme::{gauge_bar, status_color, warning_color, CAUTION_AMBER, HUD_CYAN, HUD_GREEN, INFO_DIM};
+use super::theme::{
+    gauge_bar, status_color, warning_color, CAUTION_AMBER, HUD_CYAN, HUD_GREEN, INFO_DIM,
+};
 use super::TraceData;
 use crate::classification::diagnostics;
 
@@ -64,7 +66,9 @@ impl StatusPanel {
         let (status_text, status_style) = if self.has_warnings {
             (
                 "[!] CAUTION",
-                Style::default().fg(CAUTION_AMBER).add_modifier(Modifier::BOLD | Modifier::SLOW_BLINK),
+                Style::default()
+                    .fg(CAUTION_AMBER)
+                    .add_modifier(Modifier::BOLD | Modifier::SLOW_BLINK),
             )
         } else {
             ("[-] NOMINAL", Style::default().fg(HUD_GREEN).add_modifier(Modifier::BOLD))
@@ -85,7 +89,10 @@ impl StatusPanel {
             ]),
             Line::from(vec![
                 Span::styled(" Debug   ", Style::default().fg(INFO_DIM)),
-                Span::styled(format!("{:.0}%", self.debug_info_coverage), Style::default().fg(debug_color)),
+                Span::styled(
+                    format!("{:.0}%", self.debug_info_coverage),
+                    Style::default().fg(debug_color),
+                ),
             ]),
             Line::from(""),
         ];

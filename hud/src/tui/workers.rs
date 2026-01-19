@@ -57,7 +57,10 @@ impl WorkersPanel {
                     Line::from(vec![
                         Span::styled(format!("W{worker_id} "), Style::default().fg(HUD_CYAN)),
                         Span::styled(gauge_bar(percentage, 10), Style::default().fg(bar_color)),
-                        Span::styled(format!(" {percentage:>3.0}%"), Style::default().fg(bar_color)),
+                        Span::styled(
+                            format!(" {percentage:>3.0}%"),
+                            Style::default().fg(bar_color),
+                        ),
                     ])
                 })
             })

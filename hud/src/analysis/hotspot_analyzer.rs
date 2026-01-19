@@ -291,11 +291,8 @@ pub fn analyze_hotspots(data: &TraceData) -> Vec<FunctionHotspot> {
         .into_iter()
         .map(|(name, (workers, file, line, call_stacks))| {
             let count: usize = workers.values().sum();
-            let percentage = if total_samples > 0 {
-                (count as f64 / total_samples as f64) * 100.0
-            } else {
-                0.0
-            };
+            let percentage =
+                if total_samples > 0 { (count as f64 / total_samples as f64) * 100.0 } else { 0.0 };
             FunctionHotspot { name, count, percentage, workers, file, line, call_stacks }
         })
         .collect();

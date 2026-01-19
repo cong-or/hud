@@ -113,7 +113,11 @@ pub(crate) fn format_duration_human(secs: f64) -> String {
             .flatten()
             .collect();
 
-            if parts.is_empty() { "0s".to_string() } else { parts.join(" ") }
+            if parts.is_empty() {
+                "0s".to_string()
+            } else {
+                parts.join(" ")
+            }
         }
     }
 }
@@ -1082,8 +1086,7 @@ impl LiveApp {
                         .frozen_file_group
                         .as_ref()
                         .map_or(0, |g| g.hotspots.len().saturating_sub(1));
-                    self.file_drilldown_selected =
-                        (self.file_drilldown_selected + 1).min(max_idx);
+                    self.file_drilldown_selected = (self.file_drilldown_selected + 1).min(max_idx);
                 }
                 KeyCode::Enter => {
                     // Drill into selected function (nested drilldown)

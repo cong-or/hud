@@ -373,7 +373,10 @@ impl HotspotView {
             ));
 
             // Line 2: function count
-            let fn_label = match group.count { 1 => "function", _ => "functions" };
+            let fn_label = match group.count {
+                1 => "function",
+                _ => "functions",
+            };
             lines.push(Line::from(vec![
                 Span::raw("        "),
                 Span::styled(format!("{} {fn_label}", group.count), Style::default().fg(INFO_DIM)),
