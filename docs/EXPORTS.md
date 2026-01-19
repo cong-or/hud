@@ -32,7 +32,7 @@ sudo hud my-app --headless --export trace.json --duration 300
 # Extended soak test (1 hour)
 sudo hud my-app --headless --export trace.json --duration 3600
 
-# Run indefinitely until Ctrl+C (--duration 0 is default, can omit)
+# Run indefinitely until Ctrl+C (omit --duration)
 sudo hud my-app --headless --export trace.json
 ```
 

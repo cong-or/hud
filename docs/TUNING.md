@@ -2,7 +2,7 @@
 
 ## Rolling Window
 
-`--window <secs>` limits the display to events from the last N seconds. Default: 0 (all data).
+`--window <secs>` limits the display to events from the last N seconds. Omit for all data.
 
 ```bash
 sudo hud my-app --window 30   # show last 30 seconds only

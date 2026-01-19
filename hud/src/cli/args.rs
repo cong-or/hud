@@ -55,7 +55,7 @@ pub struct Args {
     #[arg(long, default_value = "5", value_name = "MS")]
     pub threshold: u64,
 
-    /// Rolling time window in seconds (0 = all data, default)
+    /// Rolling time window in seconds (omit for all data)
     #[arg(long, default_value = "0", value_name = "SECS")]
     pub window: u64,
 }
