@@ -72,8 +72,8 @@ sudo hud my-app --threshold 1    # more sensitive
 # Rolling time window (only show last N seconds)
 sudo hud my-app --window 30      # metrics decay when load stops
 
-# Headless mode (CI/scripting)
-sudo hud my-app --export trace.json --headless --duration 60
+# Headless mode (CI/scripting) - run for 60 seconds then exit
+sudo hud my-app --headless --export trace.json --duration 60
 ```
 
 See [Tuning](docs/TUNING.md) for threshold selection guide.

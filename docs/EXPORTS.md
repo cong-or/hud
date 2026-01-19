@@ -4,6 +4,56 @@ The live TUI shows functions disappearing from the hotspot list after a fix — 
 
 See [Tuning](TUNING.md) for threshold selection and debugging workflow.
 
+## Headless Mode
+
+For CI pipelines, automated testing, or unattended profiling sessions:
+
+```bash
+sudo hud my-app --headless --export trace.json --duration 60
+```
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--headless` | Yes | No TUI, runs silently until complete |
+| `--export <file>` | Yes* | Output file for trace data (required with `--headless`) |
+| `--duration <secs>` | No | Stop after N seconds. Default: 0 (unlimited, run until Ctrl+C) |
+| `--threshold <ms>` | No | Blocking threshold. Default: 5ms |
+| `--window <secs>` | No | Rolling window (usually not needed for exports) |
+
+### Session length examples
+
+```bash
+# Quick smoke test (1 minute)
+sudo hud my-app --headless --export trace.json --duration 60
+
+# Standard profiling session (5 minutes)
+sudo hud my-app --headless --export trace.json --duration 300
+
+# Extended soak test (1 hour)
+sudo hud my-app --headless --export trace.json --duration 3600
+
+# Run until manually stopped (Ctrl+C)
+sudo hud my-app --headless --export trace.json --duration 0
+```
+
+### CI pipeline example
+
+```yaml
+# GitHub Actions
+- name: Profile under load
+  run: |
+    ./load-generator.sh &
+    sudo timeout 120 ./hud my-app --headless --export profile.json --duration 60
+
+- name: Check for blocking regressions
+  run: |
+    EVENT_COUNT=$(jq '[.traceEvents[] | select(.ph=="B")] | length' profile.json)
+    if [ "$EVENT_COUNT" -gt 100 ]; then
+      echo "FAIL: $EVENT_COUNT blocking events detected"
+      exit 1
+    fi
+```
+
 ## Before/after workflow
 
 **Step 1: Capture baseline under load**

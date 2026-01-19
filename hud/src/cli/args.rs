@@ -39,8 +39,8 @@ pub struct Args {
     #[arg(long, value_name = "FILE")]
     pub export: Option<PathBuf>,
 
-    /// Stop after N seconds (0 = unlimited)
-    #[arg(long, default_value = "0")]
+    /// Stop profiling after N seconds (0 = run until Ctrl+C)
+    #[arg(long, default_value = "0", value_name = "SECS")]
     pub duration: u64,
 
     /// Run without TUI (requires --export)
