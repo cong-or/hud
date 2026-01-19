@@ -40,6 +40,16 @@ use hud_common::{
 };
 
 // ============================================================================
+// Constants
+// ============================================================================
+
+/// Stack capture flags: BPF_F_USER_STACK (0x100) | BPF_F_FAST_STACK_CMP (0x200)
+///
+/// - BPF_F_USER_STACK: Capture user-space stack (not kernel)
+/// - BPF_F_FAST_STACK_CMP: Use stack hash for deduplication (faster, slight collision risk)
+const STACK_FLAGS: u64 = 0x300;
+
+// ============================================================================
 // eBPF Maps - Shared data structures between kernel and userspace
 // ============================================================================
 
@@ -227,8 +237,7 @@ fn handle_thread_on_cpu(tid: u32, now: u64, ctx: &TracePointContext) -> Result<(
     }
 
     // Track execution span and emit start event
-    // Use BPF_F_USER_STACK (0x100) | BPF_F_FAST_STACK_CMP (0x200) for better unwinding
-    let stack_id = unsafe { STACK_TRACES.get_stackid(ctx, 0x300).unwrap_or(-1) };
+    let stack_id = unsafe { STACK_TRACES.get_stackid(ctx, STACK_FLAGS).unwrap_or(-1) };
     let cpu_id = get_cpu_id();
 
     // Create execution span
@@ -259,7 +268,7 @@ fn handle_thread_on_cpu(tid: u32, now: u64, ctx: &TracePointContext) -> Result<(
 
             let task_id = unsafe { THREAD_TASK_MAP.get(&tid).copied().unwrap_or(0) };
 
-            let stack_id = unsafe { STACK_TRACES.get_stackid(ctx, 0x300).unwrap_or(-1) };
+            let stack_id = unsafe { STACK_TRACES.get_stackid(ctx, STACK_FLAGS).unwrap_or(-1) };
 
             report_scheduler_blocking(
                 tid,
@@ -449,9 +458,8 @@ fn try_on_cpu_sample(ctx: &PerfEventContext) -> Result<(), i64> {
 
     let timestamp_ns = unsafe { bpf_ktime_get_ns() };
 
-    // Capture stack trace - perf_event context has pt_regs, so this should work!
-    // Use BPF_F_USER_STACK (0x100) | BPF_F_FAST_STACK_CMP (0x200)
-    let stack_id = unsafe { STACK_TRACES.get_stackid(ctx, 0x300).unwrap_or(-1) };
+    // Capture user-space stack trace
+    let stack_id = unsafe { STACK_TRACES.get_stackid(ctx, STACK_FLAGS).unwrap_or(-1) };
 
     let worker_id = get_worker_id(tid);
     let cpu_id = get_cpu_id();

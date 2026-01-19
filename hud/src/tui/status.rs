@@ -8,7 +8,7 @@ use ratatui::{
 
 use std::collections::HashMap;
 
-use super::theme::{gauge_bar, CAUTION_AMBER, HUD_CYAN, HUD_GREEN, INFO_DIM};
+use super::theme::{gauge_bar, status_color, warning_color, CAUTION_AMBER, HUD_CYAN, HUD_GREEN, INFO_DIM};
 use super::TraceData;
 use crate::classification::diagnostics;
 
@@ -24,8 +24,9 @@ pub struct StatusPanel {
 
 impl StatusPanel {
     pub fn new(data: &TraceData) -> Self {
+        // Aggregate worker activity: (total_samples, samples_with_function_names)
         let worker_activity = data.events.iter().fold(HashMap::new(), |mut acc, event| {
-            let entry = acc.entry(event.worker_id).or_insert((0, 0));
+            let entry = acc.entry(event.worker_id).or_insert((0usize, 0usize));
             entry.0 += 1;
             if event.name != "execution" {
                 entry.1 += 1;
@@ -33,25 +34,15 @@ impl StatusPanel {
             acc
         });
 
+        // Find busiest worker by percentage of samples with function names
         let busiest = worker_activity
             .iter()
-            .max_by_key(
-                |(_, (total, with_funcs))| {
-                    if *total > 0 {
-                        (*with_funcs * 100) / *total
-                    } else {
-                        0
-                    }
-                },
-            )
-            .map(|(worker_id, (total, with_funcs))| {
-                let percentage = if *total > 0 {
-                    (f64::from(*with_funcs) / f64::from(*total)) * 100.0
-                } else {
-                    0.0
-                };
-                (*worker_id, percentage)
-            });
+            .filter(|(_, (total, _))| *total > 0)
+            .map(|(&worker_id, &(total, with_funcs))| {
+                let percentage = (with_funcs as f64 / total as f64) * 100.0;
+                (worker_id, percentage)
+            })
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         // Get coverage once, derive low_coverage from it (avoids redundant atomic loads)
         let debug_info_coverage = diagnostics().debug_info_coverage();
@@ -69,66 +60,58 @@ impl StatusPanel {
     }
 
     pub fn render(&self, f: &mut Frame, area: Rect, _data: &TraceData) {
-        let mut lines = vec![];
-
-        // System status line
+        // System status line with appropriate styling
         let (status_text, status_style) = if self.has_warnings {
             (
                 "[!] CAUTION",
-                Style::default()
-                    .fg(CAUTION_AMBER)
-                    .add_modifier(Modifier::BOLD | Modifier::SLOW_BLINK),
+                Style::default().fg(CAUTION_AMBER).add_modifier(Modifier::BOLD | Modifier::SLOW_BLINK),
             )
         } else {
             ("[-] NOMINAL", Style::default().fg(HUD_GREEN).add_modifier(Modifier::BOLD))
         };
 
-        lines.push(Line::from(Span::styled(format!(" {status_text}"), status_style)));
-        lines.push(Line::from(""));
+        let debug_color = status_color(self.low_debug_coverage);
 
-        // Stats
-        lines.push(Line::from(vec![
-            Span::styled(" Events  ", Style::default().fg(INFO_DIM)),
-            Span::styled(format!("{}", self.total_events), Style::default().fg(HUD_GREEN)),
-        ]));
-        lines.push(Line::from(vec![
-            Span::styled(" Workers ", Style::default().fg(INFO_DIM)),
-            Span::styled(format!("{}", self.worker_count), Style::default().fg(HUD_GREEN)),
-        ]));
+        let mut lines = vec![
+            Line::from(Span::styled(format!(" {status_text}"), status_style)),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled(" Events  ", Style::default().fg(INFO_DIM)),
+                Span::styled(self.total_events.to_string(), Style::default().fg(HUD_GREEN)),
+            ]),
+            Line::from(vec![
+                Span::styled(" Workers ", Style::default().fg(INFO_DIM)),
+                Span::styled(self.worker_count.to_string(), Style::default().fg(HUD_GREEN)),
+            ]),
+            Line::from(vec![
+                Span::styled(" Debug   ", Style::default().fg(INFO_DIM)),
+                Span::styled(format!("{:.0}%", self.debug_info_coverage), Style::default().fg(debug_color)),
+            ]),
+            Line::from(""),
+        ];
 
-        // Debug info coverage indicator
-        let debug_color = if self.low_debug_coverage { CAUTION_AMBER } else { HUD_GREEN };
-        lines.push(Line::from(vec![
-            Span::styled(" Debug   ", Style::default().fg(INFO_DIM)),
-            Span::styled(
-                format!("{:.0}%", self.debug_info_coverage),
-                Style::default().fg(debug_color),
-            ),
-        ]));
-
-        lines.push(Line::from(""));
-
-        // Busiest worker with gauge
+        // Busiest worker with gauge (if any workers active)
         if let Some((worker_id, percentage)) = self.busiest_worker {
-            let bar_color = if percentage > 50.0 { CAUTION_AMBER } else { HUD_GREEN };
-            lines.push(Line::from(vec![
-                Span::styled(" Hottest ", Style::default().fg(INFO_DIM)),
-                Span::styled(format!("W{worker_id}"), Style::default().fg(HUD_CYAN)),
-            ]));
-            lines.push(Line::from(vec![
-                Span::raw(" "),
-                Span::styled(gauge_bar(percentage, 10), Style::default().fg(bar_color)),
-                Span::styled(format!(" {percentage:.0}%"), Style::default().fg(bar_color)),
-            ]));
+            let bar_color = warning_color(percentage);
+            lines.extend([
+                Line::from(vec![
+                    Span::styled(" Hottest ", Style::default().fg(INFO_DIM)),
+                    Span::styled(format!("W{worker_id}"), Style::default().fg(HUD_CYAN)),
+                ]),
+                Line::from(vec![
+                    Span::raw(" "),
+                    Span::styled(gauge_bar(percentage, 10), Style::default().fg(bar_color)),
+                    Span::styled(format!(" {percentage:.0}%"), Style::default().fg(bar_color)),
+                ]),
+            ]);
         }
 
-        let border_color = if self.has_warnings { CAUTION_AMBER } else { HUD_GREEN };
         let paragraph = Paragraph::new(lines).block(
             Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Plain)
                 .title("[ STATUS ]")
-                .border_style(Style::default().fg(border_color)),
+                .border_style(Style::default().fg(status_color(self.has_warnings))),
         );
 
         f.render_widget(paragraph, area);

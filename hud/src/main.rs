@@ -83,7 +83,7 @@ fn resolve_pid_and_target(args: &Args) -> Result<(i32, String)> {
             );
         }
         let info = find_process_by_name(name)?;
-        let target = info.exe_path.to_string_lossy().to_string();
+        let target = info.exe_path.to_string_lossy().into_owned();
         return Ok((info.pid, target));
     }
 
@@ -94,10 +94,10 @@ fn resolve_pid_and_target(args: &Args) -> Result<(i32, String)> {
             std::fs::canonicalize(t)
                 .with_context(|| format!("Failed to resolve path: {t}"))?
                 .to_string_lossy()
-                .to_string()
+                .into_owned()
         } else {
             // Auto-detect from /proc/<pid>/exe
-            resolve_exe_path(pid)?.to_string_lossy().to_string()
+            resolve_exe_path(pid)?.to_string_lossy().into_owned()
         };
         return Ok((pid, target));
     }

@@ -221,16 +221,15 @@ const RUNTIME_CRATE_PATTERNS: &[&str] = &[
 
 /// Classify a function by its module prefix.
 fn classify_by_function_prefix(function: &str) -> Option<FrameOrigin> {
-    if STD_PREFIXES.iter().any(|p| function.starts_with(p)) {
-        return Some(FrameOrigin::StdLib);
-    }
-    if RUNTIME_PREFIXES.iter().any(|p| function.starts_with(p)) {
-        return Some(FrameOrigin::RuntimeLib);
-    }
-    if THIRD_PARTY_PREFIXES.iter().any(|p| function.starts_with(p)) {
-        return Some(FrameOrigin::ThirdParty);
-    }
-    None
+    // Check prefix categories in order of priority
+    [
+        (STD_PREFIXES, FrameOrigin::StdLib),
+        (RUNTIME_PREFIXES, FrameOrigin::RuntimeLib),
+        (THIRD_PARTY_PREFIXES, FrameOrigin::ThirdParty),
+    ]
+    .into_iter()
+    .find(|(prefixes, _)| prefixes.iter().any(|p| function.starts_with(p)))
+    .map(|(_, origin)| origin)
 }
 
 /// Check if a file path belongs to a known runtime crate.
@@ -294,10 +293,10 @@ impl ClassificationDiagnostics {
         let without = self.frames_without_debug_info.load(Ordering::Relaxed);
         let total = with + without;
 
-        if total == 0 {
-            100.0 // No frames yet, assume full coverage
-        } else {
+        if total > 0 {
             (with as f64 / total as f64) * 100.0
+        } else {
+            100.0 // No frames yet, assume full coverage
         }
     }
 

@@ -207,15 +207,14 @@ impl HotspotStats {
     /// Convert cumulative stats to hotspot list for display
     #[must_use]
     pub fn to_hotspots(&self) -> Vec<FunctionHotspot> {
+        let total = self.total_samples;
+
         let mut hotspots: Vec<FunctionHotspot> = self
             .functions
             .iter()
             .map(|(name, stats)| {
-                let percentage = if self.total_samples > 0 {
-                    (stats.count as f64 / self.total_samples as f64) * 100.0
-                } else {
-                    0.0
-                };
+                let percentage =
+                    if total > 0 { (stats.count as f64 / total as f64) * 100.0 } else { 0.0 };
 
                 // Sort call stacks by frequency
                 let mut sorted_stacks = stats.call_stacks.clone();
@@ -292,8 +291,11 @@ pub fn analyze_hotspots(data: &TraceData) -> Vec<FunctionHotspot> {
         .into_iter()
         .map(|(name, (workers, file, line, call_stacks))| {
             let count: usize = workers.values().sum();
-            let percentage =
-                if total_samples > 0 { (count as f64 / total_samples as f64) * 100.0 } else { 0.0 };
+            let percentage = if total_samples > 0 {
+                (count as f64 / total_samples as f64) * 100.0
+            } else {
+                0.0
+            };
             FunctionHotspot { name, count, percentage, workers, file, line, call_stacks }
         })
         .collect();

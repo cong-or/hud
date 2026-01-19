@@ -90,37 +90,31 @@ const fn severity_color(percentage: f64) -> ratatui::style::Color {
 }
 
 /// Format a duration in seconds as a human-readable string (e.g., "2d 4h 23m")
-fn format_duration_human(secs: f64) -> String {
+pub(crate) fn format_duration_human(secs: f64) -> String {
     let total_secs = secs as u64;
 
-    if total_secs == 0 {
-        return "0s".to_string();
-    }
+    match total_secs {
+        0 => "0s".to_string(),
+        t => {
+            let days = t / 86400;
+            let hours = (t % 86400) / 3600;
+            let mins = (t % 3600) / 60;
+            let secs = t % 60;
 
-    let days = total_secs / 86400;
-    let hours = (total_secs % 86400) / 3600;
-    let mins = (total_secs % 3600) / 60;
-    let secs = total_secs % 60;
+            // Build parts using filter_map to skip zero values
+            let parts: Vec<String> = [
+                (days > 0).then(|| format!("{days}d")),
+                (hours > 0).then(|| format!("{hours}h")),
+                (mins > 0).then(|| format!("{mins}m")),
+                // Only show seconds if duration is less than an hour
+                (secs > 0 && t < 3600).then(|| format!("{secs}s")),
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
 
-    let mut parts = Vec::new();
-    if days > 0 {
-        parts.push(format!("{days}d"));
-    }
-    if hours > 0 {
-        parts.push(format!("{hours}h"));
-    }
-    if mins > 0 {
-        parts.push(format!("{mins}m"));
-    }
-    // Only show seconds if duration is less than an hour
-    if secs > 0 && total_secs < 3600 {
-        parts.push(format!("{secs}s"));
-    }
-
-    if parts.is_empty() {
-        "0s".to_string()
-    } else {
-        parts.join(" ")
+            if parts.is_empty() { "0s".to_string() } else { parts.join(" ") }
+        }
     }
 }
 
@@ -328,12 +322,10 @@ fn render_drilldown_overlay(
     let is_minimal = area.height < 20;
 
     // Adjust content based on available space
-    let max_frames = if is_minimal {
-        4
-    } else if is_compact {
-        8
-    } else {
-        12
+    let max_frames = match (is_minimal, is_compact) {
+        (true, _) => 4,
+        (_, true) => 8,
+        _ => 12,
     };
     let show_workers = !is_minimal && !hotspot.workers.is_empty();
 
@@ -348,12 +340,10 @@ fn render_drilldown_overlay(
     let content_height = (base_height + call_stack_lines + worker_lines).min(45) as u16;
 
     // Responsive sizing: expand on small terminals, clamp to available space
-    let width_pct = if is_narrow {
-        98
-    } else if area.width < 80 {
-        95
-    } else {
-        65
+    let width_pct = match area.width {
+        w if is_narrow || w < 60 => 98,
+        w if w < 80 => 95,
+        _ => 65,
     };
     let popup_height = content_height.min(area.height.saturating_sub(2));
 
@@ -791,12 +781,10 @@ fn render_file_drilldown_overlay(
     let base_height = 10; // Header + footer
     let content_height = (base_height + visible_fns * 2).min(40) as u16;
 
-    let width_pct = if is_narrow {
-        98
-    } else if area.width < 80 {
-        95
-    } else {
-        70
+    let width_pct = match area.width {
+        w if is_narrow || w < 60 => 98,
+        w if w < 80 => 95,
+        _ => 70,
     };
     let popup_height = content_height.min(area.height.saturating_sub(2));
 
@@ -1087,16 +1075,15 @@ impl LiveApp {
                     self.file_drilldown_selected = 0;
                 }
                 KeyCode::Up => {
-                    if self.file_drilldown_selected > 0 {
-                        self.file_drilldown_selected -= 1;
-                    }
+                    self.file_drilldown_selected = self.file_drilldown_selected.saturating_sub(1);
                 }
                 KeyCode::Down => {
-                    if let Some(ref group) = self.frozen_file_group {
-                        if self.file_drilldown_selected + 1 < group.hotspots.len() {
-                            self.file_drilldown_selected += 1;
-                        }
-                    }
+                    let max_idx = self
+                        .frozen_file_group
+                        .as_ref()
+                        .map_or(0, |g| g.hotspots.len().saturating_sub(1));
+                    self.file_drilldown_selected =
+                        (self.file_drilldown_selected + 1).min(max_idx);
                 }
                 KeyCode::Enter => {
                     // Drill into selected function (nested drilldown)

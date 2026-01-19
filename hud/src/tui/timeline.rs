@@ -24,22 +24,40 @@ struct WorkerStats {
     tid: u32,
 }
 
+impl WorkerStats {
+    /// Calculate load percentage (samples with function names / total)
+    fn load_percentage(&self) -> f64 {
+        if self.total_samples > 0 {
+            (self.samples_with_functions as f64 / self.total_samples as f64) * 100.0
+        } else {
+            0.0
+        }
+    }
+
+    /// Get severity color based on load percentage
+    fn load_color(&self) -> ratatui::style::Color {
+        match self.load_percentage() {
+            r if r > 50.0 => CRITICAL_RED,
+            r if r > 20.0 => CAUTION_AMBER,
+            _ => HUD_GREEN,
+        }
+    }
+}
+
 impl TimelineView {
     pub fn new(data: &TraceData) -> Self {
-        let mut worker_stats = HashMap::new();
-
-        for event in data.events.iter() {
-            let stats = worker_stats.entry(event.worker_id).or_insert(WorkerStats {
+        let worker_stats = data.events.iter().fold(HashMap::new(), |mut acc, event| {
+            let stats = acc.entry(event.worker_id).or_insert(WorkerStats {
                 total_samples: 0,
                 samples_with_functions: 0,
                 tid: event.tid,
             });
-
             stats.total_samples += 1;
             if event.name != "execution" {
                 stats.samples_with_functions += 1;
             }
-        }
+            acc
+        });
 
         Self { worker_stats }
     }
@@ -62,24 +80,13 @@ impl TimelineView {
             Style::default().fg(INFO_DIM).add_modifier(Modifier::BOLD),
         )]));
 
-        // Worker rows
-        for worker_id in data.workers.iter() {
-            if let Some(stats) = self.worker_stats.get(worker_id) {
-                let rate = if stats.total_samples > 0 {
-                    (stats.samples_with_functions as f64 / stats.total_samples as f64) * 100.0
-                } else {
-                    0.0
-                };
+        // Worker rows - use filter_map to skip workers without stats
+        lines.extend(data.workers.iter().filter_map(|worker_id| {
+            self.worker_stats.get(worker_id).map(|stats| {
+                let rate = stats.load_percentage();
+                let color = stats.load_color();
 
-                let color = if rate > 50.0 {
-                    CRITICAL_RED
-                } else if rate > 20.0 {
-                    CAUTION_AMBER
-                } else {
-                    HUD_GREEN
-                };
-
-                lines.push(Line::from(vec![
+                Line::from(vec![
                     Span::styled(format!("W{worker_id:<2} "), Style::default().fg(HUD_CYAN)),
                     Span::styled(format!("{:<8} ", stats.tid), Style::default().fg(CYAN_DIM)),
                     Span::styled(
@@ -88,9 +95,9 @@ impl TimelineView {
                     ),
                     Span::styled(gauge_bar(rate, 12), Style::default().fg(color)),
                     Span::styled(format!(" {rate:>3.0}%"), Style::default().fg(color)),
-                ]));
-            }
-        }
+                ])
+            })
+        }));
 
         let paragraph = Paragraph::new(lines).block(
             Block::default()

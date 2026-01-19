@@ -9,13 +9,13 @@ use ratatui::layout::Constraint;
 pub const MIN_WIDTH: u16 = 80;
 pub const MIN_HEIGHT: u16 = 24;
 
-// Width breakpoints
-const WIDTH_SINGLE_COLUMN: u16 = 60; // Below this: stack panels vertically
-const WIDTH_NARROW: u16 = 100; // Below this: use tighter column split
+// Width breakpoints: chosen to ensure content readability
+const WIDTH_SINGLE_COLUMN: u16 = 60; // Two 30-char columns minimum; below this stack vertically
+const WIDTH_NARROW: u16 = 100; // Comfortable for 2-column layout; below this use tighter 25/75 split
 
-// Height breakpoints
-const HEIGHT_MINIMAL: u16 = 16; // Below this: header + hotspots only
-const HEIGHT_COMPACT: u16 = 24; // Below this: hide workers panel
+// Height breakpoints: based on typical terminal sizes and content requirements
+const HEIGHT_MINIMAL: u16 = 16; // ~80x16 terminal can show header + 6 hotspots
+const HEIGHT_COMPACT: u16 = 24; // Standard 80x24 terminal; hide workers to prioritize hotspots
 
 /// Terminal size classification for layout decisions.
 #[derive(Debug, Clone, Copy, PartialEq)]

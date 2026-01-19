@@ -7,7 +7,7 @@ use ratatui::{
 };
 use std::collections::HashMap;
 
-use super::theme::{gauge_bar, CAUTION_AMBER, HUD_CYAN, HUD_GREEN};
+use super::theme::{gauge_bar, warning_color, HUD_CYAN, HUD_GREEN};
 use super::TraceData;
 
 /// Workers panel - tactical thread load display
@@ -15,19 +15,27 @@ pub struct WorkersPanel {
     worker_stats: HashMap<u32, WorkerStats>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct WorkerStats {
     total_samples: usize,
     samples_with_functions: usize,
 }
 
+impl WorkerStats {
+    /// Calculate blocking percentage (samples with function names / total)
+    fn blocking_percentage(&self) -> f64 {
+        if self.total_samples > 0 {
+            (self.samples_with_functions as f64 / self.total_samples as f64) * 100.0
+        } else {
+            0.0
+        }
+    }
+}
+
 impl WorkersPanel {
     pub fn new(data: &TraceData) -> Self {
         let worker_stats = data.events.iter().fold(HashMap::new(), |mut acc, event| {
-            let stats = acc
-                .entry(event.worker_id)
-                .or_insert(WorkerStats { total_samples: 0, samples_with_functions: 0 });
-
+            let stats: &mut WorkerStats = acc.entry(event.worker_id).or_default();
             stats.total_samples += 1;
             if event.name != "execution" {
                 stats.samples_with_functions += 1;
@@ -39,25 +47,21 @@ impl WorkersPanel {
     }
 
     pub fn render(&self, f: &mut Frame, area: Rect, data: &TraceData) {
-        let mut lines = vec![];
-
-        for worker_id in data.workers.iter() {
-            if let Some(stats) = self.worker_stats.get(worker_id) {
-                let percentage = if stats.total_samples > 0 {
-                    (stats.samples_with_functions as f64 / stats.total_samples as f64) * 100.0
-                } else {
-                    0.0
-                };
-
-                let bar_color = if percentage > 50.0 { CAUTION_AMBER } else { HUD_GREEN };
-
-                lines.push(Line::from(vec![
-                    Span::styled(format!("W{worker_id} "), Style::default().fg(HUD_CYAN)),
-                    Span::styled(gauge_bar(percentage, 10), Style::default().fg(bar_color)),
-                    Span::styled(format!(" {percentage:>3.0}%"), Style::default().fg(bar_color)),
-                ]));
-            }
-        }
+        let lines: Vec<Line> = data
+            .workers
+            .iter()
+            .filter_map(|worker_id| {
+                self.worker_stats.get(worker_id).map(|stats| {
+                    let percentage = stats.blocking_percentage();
+                    let bar_color = warning_color(percentage);
+                    Line::from(vec![
+                        Span::styled(format!("W{worker_id} "), Style::default().fg(HUD_CYAN)),
+                        Span::styled(gauge_bar(percentage, 10), Style::default().fg(bar_color)),
+                        Span::styled(format!(" {percentage:>3.0}%"), Style::default().fg(bar_color)),
+                    ])
+                })
+            })
+            .collect();
 
         let paragraph = Paragraph::new(lines).block(
             Block::default()

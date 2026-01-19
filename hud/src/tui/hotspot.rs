@@ -8,6 +8,7 @@ use ratatui::{
     Frame,
 };
 
+use super::format_duration_human;
 use super::theme::{severity_marker, CAUTION_AMBER, HUD_GREEN, INFO_DIM, SEL_LEFT, SEL_RIGHT};
 use crate::analysis::{analyze_hotspots, FunctionHotspot};
 use crate::trace_data::TraceData;
@@ -71,41 +72,6 @@ fn group_by_file(hotspots: &[FunctionHotspot]) -> Vec<FileGroup> {
     result
 }
 
-/// Format a duration in seconds as a human-readable string (e.g., "2d 4h 23m")
-fn format_duration_human(secs: f64) -> String {
-    let total_secs = secs as u64;
-
-    if total_secs == 0 {
-        return "0s".to_string();
-    }
-
-    let days = total_secs / 86400;
-    let hours = (total_secs % 86400) / 3600;
-    let mins = (total_secs % 3600) / 60;
-    let secs_rem = total_secs % 60;
-
-    let mut parts = Vec::new();
-    if days > 0 {
-        parts.push(format!("{days}d"));
-    }
-    if hours > 0 {
-        parts.push(format!("{hours}h"));
-    }
-    if mins > 0 {
-        parts.push(format!("{mins}m"));
-    }
-    // Only show seconds if duration is less than an hour
-    if secs_rem > 0 && total_secs < 3600 {
-        parts.push(format!("{secs_rem}s"));
-    }
-
-    if parts.is_empty() {
-        "0s".to_string()
-    } else {
-        parts.join(" ")
-    }
-}
-
 // Pure data operations (filtering logic separated from UI state)
 
 /// Truncate a string for display, adding "..." if too long
@@ -119,6 +85,7 @@ fn truncate_for_display(s: &str, max_len: usize) -> String {
 
 /// Calculate scroll offset to keep selected item visible
 fn visible_scroll_offset(selected: usize, current_offset: usize, visible_count: usize) -> usize {
+    // Scroll down if selected is beyond visible window
     if selected >= current_offset + visible_count {
         selected.saturating_sub(visible_count - 1)
     } else {
@@ -141,10 +108,11 @@ fn render_item_line(
     percentage: f64,
 ) -> Line<'static> {
     let (sel_l, sel_r) = if is_selected { (SEL_LEFT, SEL_RIGHT) } else { (" ", " ") };
+    let base_style = Style::default().fg(severity_color);
     let name_style = if is_selected {
-        Style::default().fg(severity_color).add_modifier(Modifier::BOLD | Modifier::REVERSED)
+        base_style.add_modifier(Modifier::BOLD | Modifier::REVERSED)
     } else {
-        Style::default().fg(severity_color)
+        base_style
     };
 
     Line::from(vec![
@@ -159,12 +127,17 @@ fn render_item_line(
 
 /// Filter hotspots by function name (case-insensitive substring match)
 fn filter_by_name(hotspots: &[FunctionHotspot], query: &str) -> Vec<FunctionHotspot> {
-    if query.is_empty() {
-        return hotspots.to_vec();
+    match query {
+        "" => hotspots.to_vec(),
+        q => {
+            let query_lower = q.to_lowercase();
+            hotspots
+                .iter()
+                .filter(|h| h.name.to_lowercase().contains(&query_lower))
+                .cloned()
+                .collect()
+        }
     }
-
-    let query_lower = query.to_lowercase();
-    hotspots.iter().filter(|h| h.name.to_lowercase().contains(&query_lower)).cloned().collect()
 }
 
 // UI Component
@@ -237,13 +210,9 @@ impl HotspotView {
     }
 
     pub fn scroll_up(&mut self) {
-        if self.selected_index > 0 {
-            self.selected_index -= 1;
-            // Adjust scroll if selection goes above visible area
-            if self.selected_index < self.scroll_offset {
-                self.scroll_offset = self.selected_index;
-            }
-        }
+        self.selected_index = self.selected_index.saturating_sub(1);
+        // Adjust scroll if selection goes above visible area
+        self.scroll_offset = self.scroll_offset.min(self.selected_index);
     }
 
     pub fn scroll_down(&mut self) {
@@ -251,10 +220,8 @@ impl HotspotView {
             ViewMode::Functions => self.hotspots.len(),
             ViewMode::Files => self.file_groups.len(),
         };
-        if self.selected_index + 1 < max_index {
-            self.selected_index += 1;
-            // We'll adjust scroll in render based on visible area
-        }
+        // Increment if not at end (saturating to max - 1)
+        self.selected_index = (self.selected_index + 1).min(max_index.saturating_sub(1));
     }
 
     /// Get selected file group (when in Files view mode)
@@ -406,7 +373,7 @@ impl HotspotView {
             ));
 
             // Line 2: function count
-            let fn_label = if group.count == 1 { "function" } else { "functions" };
+            let fn_label = match group.count { 1 => "function", _ => "functions" };
             lines.push(Line::from(vec![
                 Span::raw("        "),
                 Span::styled(format!("{} {fn_label}", group.count), Style::default().fg(INFO_DIM)),
