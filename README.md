@@ -9,7 +9,7 @@ Find what's blocking your Tokio runtime. Zero-instrumentation eBPF profiler.
 > **Linux only.** This tool uses eBPF, which is a Linux kernel feature. It does not work on macOS or Windows.
 
 ```bash
-sudo hud my-server
+sudo ./hud my-server
 ```
 
 ## The Problem
@@ -65,8 +65,7 @@ sudo ./hud my-app
 ```bash
 git clone https://github.com/cong-or/hud.git && cd hud
 cargo xtask build-ebpf --release && cargo build --release
-cargo install --path hud
-sudo hud my-app
+sudo ./target/release/hud my-app
 ```
 
 ## Usage
@@ -90,15 +89,15 @@ See [Tuning](docs/TUNING.md) for threshold selection guide.
 
 ## Demo
 
-Try hud with the included demo server (requires Option B - source build):
+Try hud with the included demo server (requires Option B):
 
 ```bash
-# Build demo server (debug build preserves function names in stack traces)
+# Build demo server (debug build preserves function names)
 cargo build --example demo-server
 ./target/debug/examples/demo-server &
 
 # Profile it (auto-detects PID and binary)
-sudo hud demo-server
+sudo ./target/release/hud demo-server
 
 # Generate load (another terminal)
 ./hud/examples/load.sh
