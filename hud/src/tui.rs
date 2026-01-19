@@ -76,6 +76,19 @@ const STYLE_DIM: Style = Style::new().fg(INFO_DIM);
 const STYLE_KEY: Style = Style::new().fg(CAUTION_AMBER); // Keyboard shortcut highlight
 const STYLE_TEXT: Style = Style::new().fg(ratatui::style::Color::White);
 
+/// Get severity color based on CPU percentage thresholds.
+///
+/// - Green: < 20% CPU (nominal)
+/// - Amber: 20-40% CPU (caution)
+/// - Red: > 40% CPU (critical)
+const fn severity_color(percentage: f64) -> ratatui::style::Color {
+    match percentage {
+        p if p > 40.0 => CRITICAL_RED,
+        p if p > 20.0 => CAUTION_AMBER,
+        _ => HUD_GREEN,
+    }
+}
+
 /// Format a duration in seconds as a human-readable string (e.g., "2d 4h 23m")
 fn format_duration_human(secs: f64) -> String {
     let total_secs = secs as u64;
@@ -122,6 +135,8 @@ enum ViewMode {
     Analysis,
     /// Detailed view of a single function (frozen snapshot)
     DrillDown,
+    /// Detailed view of all functions in a file (from Files view)
+    FileDrillDown,
     /// Text input for filtering hotspots by name
     Search,
     /// Help overlay with keyboard shortcuts
@@ -345,12 +360,7 @@ fn render_drilldown_overlay(
     let popup_area = centered_popup(area, width_pct, popup_height);
     let inner_width = popup_area.width.saturating_sub(4) as usize;
 
-    // Severity color based on CPU percentage
-    let severity_color = match percentage {
-        p if p > 40.0 => CRITICAL_RED,
-        p if p > 20.0 => CAUTION_AMBER,
-        _ => HUD_GREEN,
-    };
+    let sev_color = severity_color(percentage);
 
     // Build CPU bar - shorter on narrow terminals
     let bar_width = if is_narrow { 10 } else { 20 };
@@ -380,41 +390,41 @@ fn render_drilldown_overlay(
         Line::from(""),
         // Targeting reticle header - diamonds indicate lock status
         Line::from(vec![
-            Span::styled("  ◈ ", Style::new().fg(severity_color)),
+            Span::styled("  ◈ ", Style::new().fg(sev_color)),
             Span::styled(
                 "TARGET ACQUIRED",
-                Style::new().fg(severity_color).add_modifier(Modifier::BOLD),
+                Style::new().fg(sev_color).add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" ◈", Style::new().fg(severity_color)),
+            Span::styled(" ◈", Style::new().fg(sev_color)),
         ]),
         Line::from(""),
         // Box-drawing characters create targeting brackets
-        Line::from(Span::styled("  ┌─", Style::new().fg(severity_color))),
+        Line::from(Span::styled("  ┌─", Style::new().fg(sev_color))),
         Line::from(vec![
-            Span::styled("  │ ", Style::new().fg(severity_color)),
+            Span::styled("  │ ", Style::new().fg(sev_color)),
             Span::styled("TGT  ", STYLE_DIM), // Target designation
             Span::styled(name_display, Style::new().fg(HUD_GREEN).add_modifier(Modifier::BOLD)),
         ]),
         Line::from(vec![
-            Span::styled("  │ ", Style::new().fg(severity_color)),
+            Span::styled("  │ ", Style::new().fg(sev_color)),
             Span::styled("CPU  ", STYLE_DIM), // CPU utilization gauge
-            Span::styled(cpu_bar, Style::new().fg(severity_color)),
+            Span::styled(cpu_bar, Style::new().fg(sev_color)),
             Span::styled(
                 format!(" {percentage:.1}%"),
-                Style::new().fg(severity_color).add_modifier(Modifier::BOLD),
+                Style::new().fg(sev_color).add_modifier(Modifier::BOLD),
             ),
         ]),
         Line::from(vec![
-            Span::styled("  │ ", Style::new().fg(severity_color)),
+            Span::styled("  │ ", Style::new().fg(sev_color)),
             Span::styled("LOC  ", STYLE_DIM), // Source location
             Span::styled(location, STYLE_DIM),
         ]),
         Line::from(vec![
-            Span::styled("  │ ", Style::new().fg(severity_color)),
+            Span::styled("  │ ", Style::new().fg(sev_color)),
             Span::styled("HIT  ", STYLE_DIM), // Sample hit count
             Span::styled(format!("{} samples", hotspot.count), STYLE_DIM),
         ]),
-        Line::from(Span::styled("  └─", Style::new().fg(severity_color))),
+        Line::from(Span::styled("  └─", Style::new().fg(sev_color))),
         Line::from(""),
     ];
 
@@ -684,6 +694,39 @@ fn yank_hotspot_to_clipboard(hotspot: &crate::analysis::FunctionHotspot) -> Resu
     Ok(())
 }
 
+/// Format a file group's info as plain text for clipboard.
+fn format_file_group_for_yank(group: &hotspot::FileGroup) -> String {
+    use std::fmt::Write;
+
+    let mut out = String::with_capacity(2048);
+
+    // Header
+    writeln!(out, "=== FILE: {} ===", group.file).ok();
+    writeln!(out, "Total CPU: {:.1}%", group.percentage).ok();
+    writeln!(out, "Functions: {}", group.count).ok();
+    writeln!(out).ok();
+
+    // List all functions in this file
+    writeln!(out, "HOTSPOT FUNCTIONS:").ok();
+    for hotspot in &group.hotspots {
+        let location = hotspot
+            .file
+            .as_ref()
+            .map_or(String::new(), |f| hotspot.line.map_or(f.clone(), |ln| format!("{f}:{ln}")));
+        writeln!(out, "  {:.1}%  {}  {}", hotspot.percentage, hotspot.name, location).ok();
+    }
+
+    out
+}
+
+/// Copy file group info to system clipboard.
+fn yank_file_group_to_clipboard(group: &hotspot::FileGroup) -> Result<()> {
+    let text = format_file_group_for_yank(group);
+    let mut clipboard = arboard::Clipboard::new()?;
+    clipboard.set_text(&text)?;
+    Ok(())
+}
+
 /// Render search input overlay (standalone version)
 fn render_search_overlay(f: &mut ratatui::Frame, area: Rect, query: &str) {
     let popup_area = {
@@ -721,6 +764,184 @@ fn render_search_overlay(f: &mut ratatui::Frame, area: Rect, query: &str) {
     f.render_widget(search_widget, popup_area);
 }
 
+/// Render file drilldown overlay showing all hotspot functions in a file.
+///
+/// Styled as an F-35 targeting computer UI with:
+/// - Severity-colored header based on aggregate CPU%
+/// - File path as target designation
+/// - Scrollable list of functions with selection highlight
+/// - Per-function CPU percentages
+fn render_file_drilldown_overlay(
+    f: &mut ratatui::Frame,
+    area: Rect,
+    file_group: &hotspot::FileGroup,
+    selected_idx: usize,
+    hotspot_view: Option<&HotspotView>,
+) {
+    if render_size_warning(f, area, "view file details") {
+        return;
+    }
+
+    // Responsive thresholds
+    let is_narrow = area.width < 60;
+
+    // Calculate popup size based on content
+    let fn_count = file_group.hotspots.len();
+    let visible_fns = fn_count.min(12); // Show up to 12 functions
+    let base_height = 10; // Header + footer
+    let content_height = (base_height + visible_fns * 2).min(40) as u16;
+
+    let width_pct = if is_narrow {
+        98
+    } else if area.width < 80 {
+        95
+    } else {
+        70
+    };
+    let popup_height = content_height.min(area.height.saturating_sub(2));
+
+    let popup_area = centered_popup(area, width_pct, popup_height);
+    let inner_width = popup_area.width.saturating_sub(4) as usize;
+
+    let sev_color = severity_color(file_group.percentage);
+
+    // Extract just filename for display
+    let display_file = std::path::Path::new(&file_group.file)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(&file_group.file);
+
+    // Truncate file path if needed
+    let max_file_len = inner_width.saturating_sub(10);
+    let file_display = if display_file.len() > max_file_len {
+        format!("{}…", &display_file[..max_file_len.saturating_sub(1)])
+    } else {
+        display_file.to_string()
+    };
+
+    // Build CPU bar
+    let bar_width = if is_narrow { 10 } else { 20 };
+    let cpu_filled = ((file_group.percentage / 100.0) * bar_width as f64) as usize;
+    let cpu_bar = format!(
+        "{}{}",
+        "█".repeat(cpu_filled.min(bar_width)),
+        "░".repeat(bar_width.saturating_sub(cpu_filled))
+    );
+
+    // Build display lines
+    let mut lines = vec![
+        Line::from(""),
+        // Targeting reticle header
+        Line::from(vec![
+            Span::styled("  ◈ ", Style::new().fg(sev_color)),
+            Span::styled("FILE ANALYSIS", Style::new().fg(sev_color).add_modifier(Modifier::BOLD)),
+            Span::styled(" ◈", Style::new().fg(sev_color)),
+        ]),
+        Line::from(""),
+        // Targeting brackets
+        Line::from(Span::styled("  ┌─", Style::new().fg(sev_color))),
+        Line::from(vec![
+            Span::styled("  │ ", Style::new().fg(sev_color)),
+            Span::styled("FILE ", STYLE_DIM),
+            Span::styled(file_display, Style::new().fg(HUD_GREEN).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(vec![
+            Span::styled("  │ ", Style::new().fg(sev_color)),
+            Span::styled("CPU  ", STYLE_DIM),
+            Span::styled(cpu_bar, Style::new().fg(sev_color)),
+            Span::styled(
+                format!(" {:.1}%", file_group.percentage),
+                Style::new().fg(sev_color).add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("  │ ", Style::new().fg(sev_color)),
+            Span::styled("FNS  ", STYLE_DIM),
+            Span::styled(format!("{} hotspot functions", file_group.count), STYLE_DIM),
+        ]),
+        Line::from(Span::styled("  └─", Style::new().fg(sev_color))),
+        Line::from(""),
+    ];
+
+    // Function list section
+    lines.push(Line::from(Span::styled("  FUNCTIONS (Enter to inspect)", STYLE_DIM)));
+
+    // Calculate scroll window to keep selection visible
+    let scroll_offset = selected_idx.saturating_sub(visible_fns.saturating_sub(1));
+    let max_name_len = inner_width.saturating_sub(15);
+
+    for (idx, hotspot) in
+        file_group.hotspots.iter().enumerate().skip(scroll_offset).take(visible_fns)
+    {
+        let is_selected = idx == selected_idx;
+
+        // Truncate function name if needed
+        let name_display = if hotspot.name.len() > max_name_len {
+            format!("{}…", &hotspot.name[..max_name_len.saturating_sub(1)])
+        } else {
+            hotspot.name.clone()
+        };
+
+        // Look up live percentage if available, fall back to frozen value
+        let percentage = hotspot_view
+            .and_then(|hv| hv.hotspots.iter().find(|h| h.name == hotspot.name))
+            .map_or(hotspot.percentage, |h| h.percentage);
+
+        let fn_color = severity_color(percentage);
+        let (sel_l, sel_r) = if is_selected { ("▶ ", " ◀") } else { ("  ", "  ") };
+
+        let name_style = if is_selected {
+            Style::new().fg(fn_color).add_modifier(Modifier::BOLD | Modifier::REVERSED)
+        } else {
+            Style::new().fg(fn_color)
+        };
+
+        // Main line: selector, name, percentage
+        lines.push(Line::from(vec![
+            Span::styled(format!("   {sel_l}"), Style::new().fg(CAUTION_AMBER)),
+            Span::styled(name_display, name_style),
+            Span::styled(format!(" {percentage:>5.1}%"), Style::new().fg(fn_color)),
+            Span::styled(sel_r, Style::new().fg(CAUTION_AMBER)),
+        ]));
+
+        // Detail line: source location
+        let location = hotspot.line.map_or_else(String::new, |ln| format!("line {ln}"));
+        lines.push(Line::from(vec![Span::raw("        "), Span::styled(location, STYLE_DIM)]));
+    }
+
+    // Scroll indicator when list is truncated
+    if fn_count > visible_fns {
+        let shown_end = (scroll_offset + visible_fns).min(fn_count);
+        lines.push(Line::from(Span::styled(
+            format!("       ... ({}-{} of {fn_count})", scroll_offset + 1, shown_end),
+            STYLE_DIM,
+        )));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("  [ESC]", STYLE_KEY),
+        Span::styled(" Close  ", STYLE_DIM),
+        Span::styled("[↑↓]", STYLE_KEY),
+        Span::styled(" Navigate  ", STYLE_DIM),
+        Span::styled("[Enter]", STYLE_KEY),
+        Span::styled(" Inspect  ", STYLE_DIM),
+        Span::styled("[Y]", STYLE_KEY),
+        Span::styled(" Yank", STYLE_DIM),
+    ]));
+
+    let widget = Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Plain)
+            .title("[ ◈ FILE LOCK ◈ ]")
+            .style(Style::new().bg(ratatui::style::Color::Black).fg(HUD_GREEN)),
+    );
+
+    f.render_widget(ratatui::widgets::Clear, popup_area);
+    f.render_widget(widget, popup_area);
+}
+
 // =============================================================================
 // LIVE MODE (LiveApp)
 // =============================================================================
@@ -747,6 +968,10 @@ struct LiveApp {
 
     /// Frozen snapshot of hotspot for drilldown (prevents flicker during live updates)
     frozen_hotspot: Option<crate::analysis::FunctionHotspot>,
+    /// Frozen file group for file drilldown view
+    frozen_file_group: Option<hotspot::FileGroup>,
+    /// Selected index within file drilldown's function list
+    file_drilldown_selected: usize,
 }
 
 impl LiveApp {
@@ -759,6 +984,8 @@ impl LiveApp {
             search_query: String::new(),
             should_quit: false,
             frozen_hotspot: None,
+            frozen_file_group: None,
+            file_drilldown_selected: 0,
         }
     }
 
@@ -779,11 +1006,25 @@ impl LiveApp {
                     }
                 }
                 KeyCode::Enter => {
-                    // Freeze the selected hotspot for drilldown view
-                    self.frozen_hotspot =
-                        self.hotspot_view.as_ref().and_then(|hv| hv.get_selected().cloned());
-                    if self.frozen_hotspot.is_some() {
-                        self.view_mode = ViewMode::DrillDown;
+                    // Branch based on hotspot view mode
+                    if let Some(hv) = &self.hotspot_view {
+                        match hv.view_mode() {
+                            hotspot::ViewMode::Functions => {
+                                // Freeze the selected hotspot for drilldown view
+                                self.frozen_hotspot = hv.get_selected().cloned();
+                                if self.frozen_hotspot.is_some() {
+                                    self.view_mode = ViewMode::DrillDown;
+                                }
+                            }
+                            hotspot::ViewMode::Files => {
+                                // Freeze the selected file group for file drilldown view
+                                self.frozen_file_group = hv.get_selected_file_group().cloned();
+                                if self.frozen_file_group.is_some() {
+                                    self.file_drilldown_selected = 0;
+                                    self.view_mode = ViewMode::FileDrillDown;
+                                }
+                            }
+                        }
                     }
                 }
                 KeyCode::Char('/') => {
@@ -832,6 +1073,43 @@ impl LiveApp {
                 KeyCode::Char('y' | 'Y') => {
                     if let Some(ref hotspot) = self.frozen_hotspot {
                         if let Err(e) = yank_hotspot_to_clipboard(hotspot) {
+                            log::warn!("Failed to copy to clipboard: {e}");
+                        }
+                    }
+                }
+                _ => {}
+            },
+            // FileDrillDown overlay - navigate functions in file, drill into function, yank
+            ViewMode::FileDrillDown => match key {
+                KeyCode::Esc | KeyCode::Char('q' | 'Q') => {
+                    self.view_mode = ViewMode::Analysis;
+                    self.frozen_file_group = None;
+                    self.file_drilldown_selected = 0;
+                }
+                KeyCode::Up => {
+                    if self.file_drilldown_selected > 0 {
+                        self.file_drilldown_selected -= 1;
+                    }
+                }
+                KeyCode::Down => {
+                    if let Some(ref group) = self.frozen_file_group {
+                        if self.file_drilldown_selected + 1 < group.hotspots.len() {
+                            self.file_drilldown_selected += 1;
+                        }
+                    }
+                }
+                KeyCode::Enter => {
+                    // Drill into selected function (nested drilldown)
+                    if let Some(ref group) = self.frozen_file_group {
+                        if let Some(hotspot) = group.hotspots.get(self.file_drilldown_selected) {
+                            self.frozen_hotspot = Some(hotspot.clone());
+                            self.view_mode = ViewMode::DrillDown;
+                        }
+                    }
+                }
+                KeyCode::Char('y' | 'Y') => {
+                    if let Some(ref group) = self.frozen_file_group {
+                        if let Err(e) = yank_file_group_to_clipboard(group) {
                             log::warn!("Failed to copy to clipboard: {e}");
                         }
                     }
@@ -1114,6 +1392,19 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
                     }
                 }
 
+                // FileDrillDown overlay (shows all functions in a file)
+                if app.view_mode == ViewMode::FileDrillDown {
+                    if let Some(ref file_group) = app.frozen_file_group {
+                        render_file_drilldown_overlay(
+                            f,
+                            area,
+                            file_group,
+                            app.file_drilldown_selected,
+                            app.hotspot_view.as_ref(),
+                        );
+                    }
+                }
+
                 // Status bar keybinds - show context-appropriate keys (only if visible)
                 if layout_cfg.show_status_bar {
                     let status_line = match app.view_mode {
@@ -1123,6 +1414,17 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>) -> Result<()> 
                             Span::styled("Y", STYLE_KEY),
                             Span::styled(":Yank ", STYLE_DIM),
                             Span::styled("[Detail]", Style::new().fg(CAUTION_AMBER)),
+                        ]),
+                        ViewMode::FileDrillDown => Line::from(vec![
+                            Span::styled("ESC", STYLE_KEY),
+                            Span::styled(":Close ", STYLE_DIM),
+                            Span::styled("↑↓", STYLE_KEY),
+                            Span::styled(":Nav ", STYLE_DIM),
+                            Span::styled("Enter", STYLE_KEY),
+                            Span::styled(":Inspect ", STYLE_DIM),
+                            Span::styled("Y", STYLE_KEY),
+                            Span::styled(":Yank ", STYLE_DIM),
+                            Span::styled("[File]", Style::new().fg(CAUTION_AMBER)),
                         ]),
                         ViewMode::Search => Line::from(vec![
                             Span::styled("ESC", STYLE_KEY),
