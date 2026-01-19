@@ -53,19 +53,20 @@ force-frame-pointers = true
 
 ## Install
 
-Download the binary:
+**Option A: Pre-built binary** (no Rust toolchain needed)
 
 ```bash
 curl -L https://github.com/cong-or/hud/releases/latest/download/hud-linux-x86_64.tar.gz | tar xz
 sudo ./hud my-app
 ```
 
-Or build from source:
+**Option B: Build from source**
 
 ```bash
 git clone https://github.com/cong-or/hud.git && cd hud
 cargo xtask build-ebpf --release && cargo build --release
-sudo ./target/release/hud my-app
+cargo install --path hud
+sudo hud my-app
 ```
 
 ## Usage
@@ -89,16 +90,15 @@ See [Tuning](docs/TUNING.md) for threshold selection guide.
 
 ## Demo
 
-Try hud with the included demo server:
+Try hud with the included demo server (requires Option B - source build):
 
 ```bash
 # Build demo server (debug build preserves function names in stack traces)
 cargo build --example demo-server
 ./target/debug/examples/demo-server &
 
-# Profile it
-sudo ./target/release/hud --pid $(pgrep demo-server) \
-    --target ./target/debug/examples/demo-server
+# Profile it (auto-detects PID and binary)
+sudo hud demo-server
 
 # Generate load (another terminal)
 ./hud/examples/load.sh
