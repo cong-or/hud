@@ -18,19 +18,24 @@ These bugs are silent. No errors, no panics—just degraded throughput. hud make
 
 ## How It Works
 
-Watches the Linux scheduler via eBPF. When a worker thread experiences high scheduling latency (time waiting in the run queue), captures a stack trace. High scheduling latency is a symptom of blocking—when one task monopolizes a worker, others queue up waiting.
+Watches the Linux scheduler via eBPF. When a worker thread experiences high OS-level scheduling latency (time the thread waits in the kernel run queue, not Tokio's task queue), captures a stack trace. High scheduling latency is a symptom of blocking—when one task monopolizes a worker, others queue up waiting.
 
 ## Why hud?
 
 Unlike [tokio-console](https://github.com/tokio-rs/console) or [tokio-blocked](https://github.com/theduke/tokio-blocked), hud requires no code changes—attach to any running Tokio process.
 
-**Why not just use tokio-console?** It's the official tool and more accurate—it measures actual task poll durations. Use it if you can. But it requires adding `console-subscriber` and rebuilding. hud exists for profiling without code changes—staging environments, load testing, or local debugging where you can run a debug-enabled build.
+**Why not just use tokio-console?** It's the official tool and more accurate—it measures actual task poll durations. Use it if you can. But it requires adding `console-subscriber` and rebuilding.
+
+**What about Tokio's unstable blocking detection?** Compile with `RUSTFLAGS="--cfg tokio_unstable"` and Tokio warns when task polls exceed a threshold. This catches the *blocker* directly, not victims—more accurate than hud. But it requires a rebuild, and only catches blocks exceeding the threshold during that run.
+
+hud exists for profiling without code changes or rebuilds—staging environments, load testing, quick triage of a running process, or confirming blocking is even the problem before investing in instrumentation.
 
 ### When to use what
 
 | Tool | Best for | Trade-off |
 |------|----------|-----------|
 | **hud** | Quick triage of running processes | Measures symptoms, not direct cause |
+| **Tokio unstable detection** | Find the blocker directly | Requires rebuild with `tokio_unstable` |
 | **tokio-console** | Precise task poll times | Requires code instrumentation |
 | **perf + flamegraphs** | CPU profiling, broad analysis | Manual interpretation needed |
 | **Custom metrics** | Production monitoring | Must know where to instrument |
@@ -136,7 +141,7 @@ Press `Q` to quit hud.
 
 - [Async: What is blocking?](https://ryhl.io/blog/async-what-is-blocking/) — Alice Ryhl's deep dive on blocking in async Rust
 - [tokio::task::spawn_blocking](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) — Offload blocking I/O to a thread pool
-- [rayon](https://docs.rs/rayon) — Better than spawn_blocking for CPU-heavy parallel work
+- [rayon](https://docs.rs/rayon) — For parallelizable CPU work; call from within `spawn_blocking`, not directly from async code
 - [Reducing tail latencies with automatic cooperative task yielding](https://tokio.rs/blog/2020-04-preemption) — Tokio's approach to preemption
 
 ## License
