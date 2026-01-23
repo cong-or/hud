@@ -131,7 +131,8 @@ Press `Q` to quit hud.
 ## Further Reading
 
 - [Async: What is blocking?](https://ryhl.io/blog/async-what-is-blocking/) — Alice Ryhl's deep dive on blocking in async Rust
-- [tokio::task::spawn_blocking](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) — Official docs on offloading blocking work
+- [tokio::task::spawn_blocking](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) — Offload blocking I/O to a thread pool
+- [rayon](https://docs.rs/rayon) — Better than spawn_blocking for CPU-heavy parallel work
 - [Reducing tail latencies with automatic cooperative task yielding](https://tokio.rs/blog/2020-04-preemption) — Tokio's approach to preemption
 
 ## License
