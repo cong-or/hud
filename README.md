@@ -24,6 +24,8 @@ Watches the Linux scheduler via eBPF. When a worker thread experiences high sche
 
 Unlike [tokio-console](https://github.com/tokio-rs/console) or [tokio-blocked](https://github.com/theduke/tokio-blocked), hud requires no code changes—attach to any running Tokio process.
 
+**Why not just use tokio-console?** It's the official tool and more accurate—it measures actual task poll durations. Use it if you can. But it requires adding `console-subscriber` and rebuilding. hud exists for profiling without code changes—staging environments, load testing, or local debugging where you can run a debug-enabled build.
+
 ### When to use what
 
 | Tool | Best for | Trade-off |
@@ -116,8 +118,10 @@ Press `Q` to quit hud.
 ## Limitations
 
 - Measures scheduling latency (a *symptom* of blocking), not blocking directly
+- Captures the **victim's** stack, not the **blocker's**—if Task A blocks causing Task B to wait, you see Task B's stack. Look for patterns across multiple traces.
 - System CPU pressure can cause false positives—look for consistent, repeatable traces
 - Lock contention where threads sleep (not spin) may not appear
+- Tokio 1.x only—worker detection relies on thread naming (`tokio-runtime-w`), an implementation detail
 - See [Troubleshooting](docs/TROUBLESHOOTING.md) for common issues
 
 ## Docs
