@@ -39,9 +39,9 @@ Periodic CPU sampling for stack traces. 99 Hz avoids aliasing with 100 Hz system
 
 ## Detection Methods
 
-**Scheduler-based:** Monitor off-CPU duration, report when exceeding threshold (default 5ms) while TASK_RUNNING.
+**Scheduler-based:** Monitor off-CPU duration (time in run queue). When a worker returns to CPU after waiting longer than threshold (default 5ms), capture stack trace. High off-CPU time indicates something else was monopolizing the worker—blocking.
 - Pros: No code changes, whole-program visibility
-- Cons: False positives from legitimate preemption
+- Cons: Measures symptom not cause directly; false positives from system CPU pressure
 
 **Sampling-based:** CPU sampling at 99 Hz for flame graphs.
 - Pros: Low overhead

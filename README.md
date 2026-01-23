@@ -18,11 +18,22 @@ These bugs are silent. No errors, no panics—just degraded throughput. hud make
 
 ## How It Works
 
-Watches the Linux scheduler via eBPF. When a worker thread stays on CPU too long, grabs a stack trace to show you what's blocking.
+Watches the Linux scheduler via eBPF. When a worker thread experiences high scheduling latency (time waiting in the run queue), captures a stack trace. High scheduling latency is a symptom of blocking—when one task monopolizes a worker, others queue up waiting.
 
 ## Why hud?
 
 Unlike [tokio-console](https://github.com/tokio-rs/console) or [tokio-blocked](https://github.com/theduke/tokio-blocked), hud requires no code changes—attach to any running Tokio process.
+
+### When to use what
+
+| Tool | Best for | Trade-off |
+|------|----------|-----------|
+| **hud** | Quick triage of running processes | Measures symptoms, not direct cause |
+| **tokio-console** | Precise task poll times | Requires code instrumentation |
+| **perf + flamegraphs** | CPU profiling, broad analysis | Manual interpretation needed |
+| **Custom metrics** | Production monitoring | Must know where to instrument |
+
+Use hud to narrow down suspects, then dig deeper with instrumentation if needed.
 
 ## Requirements
 
@@ -38,6 +49,8 @@ Unlike [tokio-console](https://github.com/tokio-rs/console) or [tokio-blocked](h
 debug = true
 force-frame-pointers = true
 ```
+
+> `debug = true` adds ~10-20% to binary size. `force-frame-pointers` adds ~1-2% runtime overhead. For production, you can swap in a debug-enabled binary temporarily for investigation.
 
 ## Install
 
@@ -99,6 +112,13 @@ The demo server has intentionally blocking endpoints (`/hash`, `/compress`, `/re
 > **Important**: The demo-server **must** be a debug build. Release builds aggressively inline functions, hiding your code from stack traces. If you don't see `demo-server.rs` in drilldowns, rebuild without `--release`.
 
 Press `Q` to quit hud.
+
+## Limitations
+
+- Measures scheduling latency (a *symptom* of blocking), not blocking directly
+- System CPU pressure can cause false positives—look for consistent, repeatable traces
+- Lock contention where threads sleep (not spin) may not appear
+- See [Troubleshooting](docs/TROUBLESHOOTING.md) for common issues
 
 ## Docs
 
