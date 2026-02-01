@@ -44,6 +44,32 @@ Then rebuild your application. The Debug % should rise to 80-100%.
 - Wrong binary path: Use `--target /path/to/binary` to specify the exact binary with symbols
 - Shared libraries: System libraries won't have debug info (expected)
 
+### Keeping production binaries small
+
+Debug symbols add 10-20% to binary size. If you don't want to deploy large binaries to production:
+
+1. Build with `debug = true` locally
+2. Deploy your normal optimized binary (without debug symbols) to production
+3. When you need to profile, copy the debug build to the server temporarily
+4. Run hud against the debug binary
+5. Remove the debug binary when done
+
+```bash
+# On your dev machine
+cargo build --release  # with debug = true in Cargo.toml
+
+# Copy to server when profiling needed
+scp target/release/myapp server:/tmp/myapp-debug
+
+# On server
+sudo hud --pid $(pgrep myapp) --target /tmp/myapp-debug
+
+# Cleanup
+rm /tmp/myapp-debug
+```
+
+This keeps production lean while still allowing profiling when needed.
+
 ## Permission Denied
 
 **Fix:** Run with sudo:
