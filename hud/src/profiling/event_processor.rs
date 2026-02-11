@@ -131,14 +131,13 @@ impl<'a> EventProcessor<'a> {
     ) {
         // Resolve stack early for blocking pool filtering.
         // Only START events carry meaningful stacks; END events pass through.
-        if event.event_type == TRACE_EXECUTION_START {
-            if self
+        if event.event_type == TRACE_EXECUTION_START
+            && self
                 .resolve_full_stack(event.stack_id, stack_traces)
                 .as_ref()
                 .is_some_and(|s| is_blocking_pool_stack(s))
-            {
-                return;
-            }
+        {
+            return;
         }
 
         // Get the top frame address for symbol resolution (for exporter)
