@@ -450,11 +450,9 @@ fn try_on_cpu_sample(ctx: &PerfEventContext) -> Result<(), i64> {
         let _ = PERF_EVENT_PASSED_PID_FILTER.insert(&key, &(current + 1), 0);
     }
 
-    // DEBUG: Temporarily disable Tokio worker filter to test if perf_event fires
-    // Once we confirm perf_event works, we'll re-enable this filter
-    // if !is_tokio_worker(tid) {
-    //     return Ok(());
-    // }
+    if !is_tokio_worker(tid) {
+        return Ok(());
+    }
 
     let timestamp_ns = unsafe { bpf_ktime_get_ns() };
 

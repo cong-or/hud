@@ -107,6 +107,16 @@ impl<'a> EventProcessor<'a> {
         event: TaskEvent,
         stack_traces: &StackTraceMap<T>,
     ) {
+        // Skip events from Tokio's blocking thread pool (spawn_blocking).
+        // These threads are expected to block — reporting them is noise.
+        if self
+            .resolve_full_stack(event.stack_id, stack_traces)
+            .as_ref()
+            .is_some_and(|s| is_blocking_pool_stack(s))
+        {
+            return;
+        }
+
         self.stats.scheduler_detected += 1;
 
         if self.headless {
@@ -119,6 +129,18 @@ impl<'a> EventProcessor<'a> {
         event: TaskEvent,
         stack_traces: &StackTraceMap<T>,
     ) {
+        // Resolve stack early for blocking pool filtering.
+        // Only START events carry meaningful stacks; END events pass through.
+        if event.event_type == TRACE_EXECUTION_START {
+            if self
+                .resolve_full_stack(event.stack_id, stack_traces)
+                .as_ref()
+                .is_some_and(|s| is_blocking_pool_stack(s))
+            {
+                return;
+            }
+        }
+
         // Get the top frame address for symbol resolution (for exporter)
         let top_frame_addr =
             StackResolver::get_top_frame_addr(StackId(event.stack_id), stack_traces);
@@ -129,11 +151,9 @@ impl<'a> EventProcessor<'a> {
         }
 
         // Send to TUI if running (only START events to reduce TUI load)
-        let should_send_to_tui =
-            self.event_tx.is_some() && event.event_type == TRACE_EXECUTION_START;
-
-        if should_send_to_tui {
+        if self.event_tx.is_some() && event.event_type == TRACE_EXECUTION_START {
             let trace_event = self.convert_to_trace_event(&event, stack_traces);
+
             // Non-blocking send (drop if TUI is slow)
             if let Some(ref tx) = self.event_tx {
                 let _ = tx.try_send(trace_event);
@@ -317,4 +337,13 @@ impl<'a> EventProcessor<'a> {
             call_stack,
         }
     }
+}
+
+/// Returns `true` if the call stack originates from Tokio's blocking thread pool.
+///
+/// Stacks from `spawn_blocking` contain frames like
+/// `tokio::runtime::blocking::pool::Inner::run` — we match the common prefix
+/// to filter out threads that are *expected* to block.
+fn is_blocking_pool_stack(call_stack: &[StackFrame]) -> bool {
+    call_stack.iter().any(|frame| frame.function.starts_with("tokio::runtime::blocking::"))
 }
