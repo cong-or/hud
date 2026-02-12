@@ -450,9 +450,10 @@ fn try_on_cpu_sample(ctx: &PerfEventContext) -> Result<(), i64> {
         let _ = PERF_EVENT_PASSED_PID_FILTER.insert(&key, &(current + 1), 0);
     }
 
-    if !is_tokio_worker(tid) {
-        return Ok(());
-    }
+    // NOTE: Worker filter intentionally disabled here.
+    // Blocking pool threads are filtered in userspace (is_blocking_pool_stack)
+    // which is more precise than thread-level filtering. Enabling the worker
+    // filter here breaks frame-pointer-based stack capture for perf_event samples.
 
     let timestamp_ns = unsafe { bpf_ktime_get_ns() };
 
