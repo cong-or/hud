@@ -35,19 +35,20 @@ use aya_ebpf::{
     EbpfContext,
 };
 use hud_common::{
-    ExecutionSpan, SchedSwitchArgs, TaskEvent, ThreadState, WorkerInfo, EVENT_SCHEDULER_DETECTED,
-    TRACE_EXECUTION_END, TRACE_EXECUTION_START,
+    SchedSwitchArgs, TaskEvent, ThreadState, WorkerInfo, DETECTION_PERF_SAMPLE,
+    DETECTION_SCHEDULER, EVENT_SCHEDULER_DETECTED, TRACE_EXECUTION_START,
 };
 
 // ============================================================================
 // Constants
 // ============================================================================
 
-/// Stack capture flags: BPF_F_USER_STACK (0x100) | BPF_F_FAST_STACK_CMP (0x200)
+/// Stack capture flags for `bpf_get_stackid`:
 ///
-/// - BPF_F_USER_STACK: Capture user-space stack (not kernel)
-/// - BPF_F_FAST_STACK_CMP: Use stack hash for deduplication (faster, slight collision risk)
-const STACK_FLAGS: u64 = 0x300;
+/// - BPF_F_USER_STACK (0x100): Capture user-space stack (not kernel)
+/// - BPF_F_FAST_STACK_CMP (0x200): Use stack hash for deduplication (faster, slight collision risk)
+/// - BPF_F_REUSE_STACKID (0x400): Overwrite existing entry on hash collision instead of returning -EEXIST
+const STACK_FLAGS: u64 = 0x100 | 0x200 | 0x400;
 
 // ============================================================================
 // eBPF Maps - Shared data structures between kernel and userspace
@@ -55,20 +56,24 @@ const STACK_FLAGS: u64 = 0x300;
 
 /// Ring buffer for sending events to userspace (lock-free, high-throughput)
 ///
-/// - **Size**: 256KB (configurable)
+/// - **Size**: 4MB
 /// - **Type**: LIFO ring buffer (overwrite oldest on overflow)
 /// - **Usage**: Kernel writes with `EVENTS.output()`, userspace reads with `ring_buf.next()`
 #[map]
-static EVENTS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0); // 256KB buffer
+static EVENTS: RingBuf = RingBuf::with_byte_size(4 * 1024 * 1024, 0); // 4MB buffer
 
 /// Stack trace map for storing deduplicated stack traces by ID
 ///
-/// - **Max Entries**: 1024 unique stacks
+/// - **Max Entries**: 16384 unique stacks
 /// - **Key**: Stack hash (computed by kernel)
 /// - **Value**: Array of instruction pointers (addresses)
 /// - **Usage**: Kernel captures with `get_stackid()`, userspace resolves with DWARF
+///
+/// Sized to avoid exhaustion from perf_event samples across many CPUs.
+/// A full map causes `bpf_get_stackid` to silently fail (-ENOMEM),
+/// dropping all new stack captures.
 #[map]
-static STACK_TRACES: StackTrace = StackTrace::with_max_entries(1024, 0);
+static STACK_TRACES: StackTrace = StackTrace::with_max_entries(16384, 0);
 
 /// Map: Thread ID (TID) → Tokio Task ID
 ///
@@ -105,16 +110,6 @@ static TOKIO_WORKER_THREADS: HashMap<u32, WorkerInfo> = HashMap::with_max_entrie
 /// - **Key 1**: Target PID for perf_event filtering
 #[map]
 static CONFIG: HashMap<u32, u64> = HashMap::with_max_entries(16, 0);
-
-/// Map: Thread ID (TID) → Current execution span
-///
-/// Tracks what each worker is currently executing for timeline visualization.
-/// Spans are created on thread ON-CPU (sched_switch) and completed on OFF-CPU.
-/// - **start_time_ns**: When execution started
-/// - **stack_id**: Stack trace ID at execution start
-/// - **cpu_id**: CPU where execution is happening
-#[map]
-static EXECUTION_SPANS: HashMap<u32, ExecutionSpan> = HashMap::with_max_entries(256, 0);
 
 // ============================================================================
 // Debug Counters - Diagnostic metrics for perf_event monitoring
@@ -197,25 +192,6 @@ fn try_sched_switch(ctx: &TracePointContext) -> Result<(), i64> {
 }
 
 fn handle_thread_off_cpu(tid: u32, state: i64, now: u64) -> Result<(), i64> {
-    // Emit execution end event for Tokio workers
-    if is_tokio_worker(tid) {
-        // Get execution span if it exists
-        let span = unsafe { EXECUTION_SPANS.get(&tid).copied() };
-
-        if let Some(span) = span {
-            // Calculate execution duration
-            let duration_ns = now - span.start_time_ns;
-
-            // Emit TRACE_EXECUTION_END event
-            emit_execution_end(tid, now, duration_ns, span.stack_id)?;
-
-            // Clear execution span
-            unsafe {
-                EXECUTION_SPANS.remove(&tid)?;
-            }
-        }
-    }
-
     // Update thread state for blocking detection
     let mut thread_state = unsafe { THREAD_STATE.get(&tid).copied().unwrap_or_default() };
 
@@ -229,26 +205,16 @@ fn handle_thread_off_cpu(tid: u32, state: i64, now: u64) -> Result<(), i64> {
     Ok(())
 }
 
-fn handle_thread_on_cpu(tid: u32, now: u64, ctx: &TracePointContext) -> Result<(), i64> {
+fn handle_thread_on_cpu(tid: u32, now: u64, _ctx: &TracePointContext) -> Result<(), i64> {
     // Early exit: Only process Tokio worker threads
     let is_worker = unsafe { TOKIO_WORKER_THREADS.get(&tid).is_some() };
     if !is_worker {
         return Ok(());
     }
 
-    // Track execution span and emit start event
-    let stack_id = unsafe { STACK_TRACES.get_stackid(ctx, STACK_FLAGS).unwrap_or(-1) };
-    let cpu_id = get_cpu_id();
-
-    // Create execution span
-    let span = ExecutionSpan { start_time_ns: now, stack_id, cpu_id, _padding: [0; 4] };
-
-    unsafe {
-        EXECUTION_SPANS.insert(&tid, &span, 0)?;
-    }
-
-    // Emit TRACE_EXECUTION_START event
-    emit_execution_start(tid, now, stack_id)?;
+    // Execution timeline events (TRACE_EXECUTION_START/END) are now handled
+    // exclusively by perf_event samples, which capture correct stacks.
+    // sched_switch only tracks state for blocking detection below.
 
     // Get thread state for blocking detection
     let mut thread_state = unsafe { THREAD_STATE.get(&tid).copied().unwrap_or_default() };
@@ -268,7 +234,9 @@ fn handle_thread_on_cpu(tid: u32, now: u64, ctx: &TracePointContext) -> Result<(
 
             let task_id = unsafe { THREAD_TASK_MAP.get(&tid).copied().unwrap_or(0) };
 
-            let stack_id = unsafe { STACK_TRACES.get_stackid(ctx, STACK_FLAGS).unwrap_or(-1) };
+            // Stack from sched_switch is the outgoing thread's, not ours.
+            // Perf_event samples provide correct stacks for blocking workers.
+            let stack_id: i64 = -1;
 
             report_scheduler_blocking(
                 tid,
@@ -316,75 +284,8 @@ fn report_scheduler_blocking(
         thread_state,
         task_id,
         category: 0,         // 0 = general
-        detection_method: 2, // 2 = scheduler-based
+        detection_method: DETECTION_SCHEDULER,
         is_tokio_worker: 1,  // Only workers trigger scheduler detection
-        _padding: [0u8; 5],
-    };
-
-    unsafe {
-        EVENTS.output(&event, 0).map_err(|_| 1i64)?;
-    }
-
-    Ok(())
-}
-
-// Helper: Emit TRACE_EXECUTION_START event
-fn emit_execution_start(tid: u32, timestamp_ns: u64, stack_id: i64) -> Result<(), i64> {
-    let pid_tgid = unsafe { bpf_get_current_pid_tgid() };
-    let pid = (pid_tgid >> 32) as u32;
-
-    let task_id = unsafe { THREAD_TASK_MAP.get(&tid).copied().unwrap_or(0) };
-
-    let event = TaskEvent {
-        pid,
-        tid,
-        timestamp_ns,
-        event_type: TRACE_EXECUTION_START,
-        stack_id,
-        duration_ns: 0, // Not applicable for start event
-        worker_id: get_worker_id(tid),
-        cpu_id: get_cpu_id(),
-        thread_state: 0,
-        task_id,
-        category: 0,         // 0 = general
-        detection_method: 3, // 3 = trace
-        is_tokio_worker: 1,
-        _padding: [0u8; 5],
-    };
-
-    unsafe {
-        EVENTS.output(&event, 0).map_err(|_| 1i64)?;
-    }
-
-    Ok(())
-}
-
-// Helper: Emit TRACE_EXECUTION_END event
-fn emit_execution_end(
-    tid: u32,
-    timestamp_ns: u64,
-    duration_ns: u64,
-    stack_id: i64,
-) -> Result<(), i64> {
-    let pid_tgid = unsafe { bpf_get_current_pid_tgid() };
-    let pid = (pid_tgid >> 32) as u32;
-
-    let task_id = unsafe { THREAD_TASK_MAP.get(&tid).copied().unwrap_or(0) };
-
-    let event = TaskEvent {
-        pid,
-        tid,
-        timestamp_ns,
-        event_type: TRACE_EXECUTION_END,
-        stack_id,
-        duration_ns,
-        worker_id: get_worker_id(tid),
-        cpu_id: get_cpu_id(),
-        thread_state: 0,
-        task_id,
-        category: 0,         // 0 = general
-        detection_method: 3, // 3 = trace
-        is_tokio_worker: 1,
         _padding: [0u8; 5],
     };
 
@@ -398,11 +299,6 @@ fn emit_execution_end(
 // Helper: Get worker ID for a TID (or u32::MAX if not a worker)
 fn get_worker_id(tid: u32) -> u32 {
     unsafe { TOKIO_WORKER_THREADS.get(&tid).map(|info| info.worker_id).unwrap_or(u32::MAX) }
-}
-
-// Helper: Check if TID is a Tokio worker
-fn is_tokio_worker(tid: u32) -> bool {
-    unsafe { TOKIO_WORKER_THREADS.get(&tid).is_some() }
 }
 
 // Helper: Get CPU ID (using aya's helper when available)
@@ -457,8 +353,8 @@ fn try_on_cpu_sample(ctx: &PerfEventContext) -> Result<(), i64> {
 
     let timestamp_ns = unsafe { bpf_ktime_get_ns() };
 
-    // Capture user-space stack trace
-    let stack_id = unsafe { STACK_TRACES.get_stackid(ctx, STACK_FLAGS).unwrap_or(-1) };
+    // Capture user-space stack trace (preserve raw error code for diagnostics)
+    let stack_id = unsafe { STACK_TRACES.get_stackid(ctx, STACK_FLAGS).unwrap_or_else(|e| e) };
 
     let worker_id = get_worker_id(tid);
     let cpu_id = get_cpu_id();
@@ -480,7 +376,7 @@ fn try_on_cpu_sample(ctx: &PerfEventContext) -> Result<(), i64> {
         thread_state: 0,
         task_id,
         category: 0,
-        detection_method: 4, // 4 = perf_event sampling
+        detection_method: DETECTION_PERF_SAMPLE,
         is_tokio_worker: 1,
         _padding: [0u8; 5],
     };

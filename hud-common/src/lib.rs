@@ -30,18 +30,15 @@
 /// Detection Method: 2 (scheduler)
 pub const EVENT_SCHEDULER_DETECTED: u32 = 3;
 
-/// **Timeline Visualization**: Worker thread started executing
+/// **Execution Sample**: Worker thread executing on-CPU
 ///
-/// Emitted by: `sched_switch_hook` when Tokio worker goes ON-CPU
-/// Paired with: `TRACE_EXECUTION_END`
-/// Detection Method: 3 (trace)
+/// Emitted by: `on_cpu_sample` perf_event at 99 Hz
+/// Detection Method: 4 (perf_event sampling)
 pub const TRACE_EXECUTION_START: u32 = 10;
 
-/// **Timeline Visualization**: Worker thread stopped executing
+/// **Execution End**: Worker thread stopped executing
 ///
-/// Emitted by: `sched_switch_hook` when Tokio worker goes OFF-CPU
-/// Paired with: `TRACE_EXECUTION_START`
-/// Detection Method: 3 (trace)
+/// Reserved for future use (no longer emitted by eBPF).
 pub const TRACE_EXECUTION_END: u32 = 11;
 
 /// **Sampling Profiler**: Periodic stack sample (unused, for future use)
@@ -54,6 +51,16 @@ pub const TRACE_FUNCTION_SAMPLE: u32 = 12;
 ///
 /// Emitted by: Userspace during worker discovery
 pub const TRACE_WORKER_METADATA: u32 = 13;
+
+// ============================================================================
+// Detection Method Constants
+// ============================================================================
+
+/// Scheduler-based detection via `sched_switch` off-CPU threshold
+pub const DETECTION_SCHEDULER: u8 = 2;
+
+/// CPU sampling via `perf_event` at configurable frequency (e.g., 99 Hz)
+pub const DETECTION_PERF_SAMPLE: u8 = 4;
 
 /// Maximum number of stack frames to capture
 ///
@@ -116,13 +123,11 @@ pub struct TaskEvent {
     // ========================================================================
     // Duration and Timing
     // ========================================================================
-    /// Duration in nanoseconds (for span/end events)
+    /// Duration in nanoseconds
     ///
     /// **Usage**:
-    /// - `EVENT_BLOCKING_END`: Duration of blocking operation (calculated in userspace)
     /// - `EVENT_SCHEDULER_DETECTED`: Off-CPU duration that exceeded threshold
-    /// - `TRACE_EXECUTION_END`: Execution duration (time on-CPU)
-    /// - `TRACE_EXECUTION_START`: Always 0 (start events have no duration)
+    /// - `TRACE_EXECUTION_START`: Always 0 (sample events have no duration)
     pub duration_ns: u64,
 
     // ========================================================================
@@ -175,10 +180,7 @@ pub struct TaskEvent {
 
     /// Detection method that produced this event
     ///
-    /// **Values**:
-    /// - `2`: Scheduler-based (threshold detection via `sched_switch`)
-    /// - `3`: Trace (timeline visualization via `sched_switch`)
-    /// - `4`: Sampling (CPU sampling via `perf_event` at 99 Hz)
+    /// See `DETECTION_SCHEDULER` (2) and `DETECTION_PERF_SAMPLE` (4).
     pub detection_method: u8,
 
     /// Whether this thread is a Tokio worker (1) or not (0)
@@ -253,38 +255,6 @@ pub struct WorkerInfo {
     /// Padding for 4-byte alignment
     #[allow(clippy::pub_underscore_fields)]
     pub _padding: [u8; 3],
-}
-
-/// Execution span tracking (for timeline visualization)
-///
-/// Tracks what each worker is currently executing. Created when worker
-/// goes ON-CPU (`sched_switch` `next_pid`) and completed when goes OFF-CPU.
-/// Stored in the `EXECUTION_SPANS` eBPF map.
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct ExecutionSpan {
-    /// Timestamp when execution started (nanoseconds)
-    ///
-    /// From `bpf_ktime_get_ns()` at ON-CPU event.
-    pub start_time_ns: u64,
-
-    /// Stack trace ID at execution start
-    ///
-    /// Captured via `bpf_get_stackid()` to identify what function is executing.
-    pub stack_id: i64,
-
-    /// CPU core where execution is happening
-    pub cpu_id: u32,
-
-    /// Padding for 8-byte alignment
-    #[allow(clippy::pub_underscore_fields)]
-    pub _padding: [u8; 4],
-}
-
-impl Default for ExecutionSpan {
-    fn default() -> Self {
-        Self { start_time_ns: 0, stack_id: -1, cpu_id: 0, _padding: [0; 4] }
-    }
 }
 
 /// Tracepoint arguments for `sched/sched_switch`
@@ -362,6 +332,3 @@ unsafe impl Pod for ThreadState {}
 #[allow(unsafe_code)]
 unsafe impl Pod for WorkerInfo {}
 
-#[cfg(feature = "user")]
-#[allow(unsafe_code)]
-unsafe impl Pod for ExecutionSpan {}

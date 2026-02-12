@@ -17,7 +17,10 @@
 
 use aya::maps::{MapData, StackTraceMap};
 use crossbeam_channel::Sender;
-use hud_common::{TaskEvent, EVENT_SCHEDULER_DETECTED, TRACE_EXECUTION_END, TRACE_EXECUTION_START};
+use hud_common::{
+    TaskEvent, DETECTION_PERF_SAMPLE, EVENT_SCHEDULER_DETECTED, TRACE_EXECUTION_END,
+    TRACE_EXECUTION_START,
+};
 use log::warn;
 use std::borrow::Borrow;
 use std::sync::Arc;
@@ -39,7 +42,13 @@ pub struct EventProcessor<'a> {
     // Mutable state
     pub stats: DetectionStats,
     pub event_count: usize,
-    /// Cache for resolved stack traces (bounded by eBPF's 1024 unique stacks)
+    /// Per-event-type counters for diagnostics
+    pub perf_sample_count: usize,
+    pub perf_stack_ok: usize,
+    pub perf_stack_fail: usize,
+    pub scheduler_event_count: usize,
+    pub blocking_pool_filtered: usize,
+    /// Cache for resolved stack traces (bounded by eBPF's 16384 unique stacks)
     stack_cache: StackCache,
 
     // Dependencies (readonly)
@@ -67,6 +76,11 @@ impl<'a> EventProcessor<'a> {
             headless,
             stats: DetectionStats::default(),
             event_count: 0,
+            perf_sample_count: 0,
+            perf_stack_ok: 0,
+            perf_stack_fail: 0,
+            scheduler_event_count: 0,
+            blocking_pool_filtered: 0,
             stack_cache: StackCache::new(),
             stack_resolver,
             symbolizer,
@@ -85,8 +99,19 @@ impl<'a> EventProcessor<'a> {
         self.event_count += 1;
 
         match event.event_type {
-            EVENT_SCHEDULER_DETECTED => self.handle_scheduler_detected(event, stack_traces),
+            EVENT_SCHEDULER_DETECTED => {
+                self.scheduler_event_count += 1;
+                self.handle_scheduler_detected(event, stack_traces);
+            }
             TRACE_EXECUTION_START | TRACE_EXECUTION_END => {
+                if event.detection_method == DETECTION_PERF_SAMPLE {
+                    self.perf_sample_count += 1;
+                    if event.stack_id >= 0 {
+                        self.perf_stack_ok += 1;
+                    } else {
+                        self.perf_stack_fail += 1;
+                    }
+                }
                 self.handle_trace_execution(event, stack_traces);
             }
             _ => {
@@ -137,6 +162,7 @@ impl<'a> EventProcessor<'a> {
                 .as_ref()
                 .is_some_and(|s| is_blocking_pool_stack(s))
         {
+            self.blocking_pool_filtered += 1;
             return;
         }
 
@@ -149,13 +175,28 @@ impl<'a> EventProcessor<'a> {
             exporter.add_event(&event, top_frame_addr);
         }
 
-        // Send to TUI if running (only START events to reduce TUI load)
-        if self.event_tx.is_some() && event.event_type == TRACE_EXECUTION_START {
+        // Send to TUI: only worker thread events with valid stacks and user code.
+        // Filters out:
+        //   - sched_switch events (stack_id=-1)
+        //   - non-worker threads (main thread, blocking pool) via worker_id
+        //   - pure runtime samples with no user code on the stack
+        if self.event_tx.is_some()
+            && event.event_type == TRACE_EXECUTION_START
+            && event.stack_id >= 0
+            && event.worker_id != u32::MAX
+        {
             let trace_event = self.convert_to_trace_event(&event, stack_traces);
 
-            // Non-blocking send (drop if TUI is slow)
-            if let Some(ref tx) = self.event_tx {
-                let _ = tx.try_send(trace_event);
+            let has_user_code = trace_event
+                .call_stack
+                .as_ref()
+                .is_some_and(|stack| stack.iter().any(|f| f.is_user_code));
+
+            if has_user_code {
+                // Non-blocking send (drop if TUI is slow)
+                if let Some(ref tx) = self.event_tx {
+                    let _ = tx.try_send(trace_event);
+                }
             }
         }
 
@@ -318,11 +359,20 @@ impl<'a> EventProcessor<'a> {
         // Resolve full call stack
         let call_stack = self.resolve_full_stack(event.stack_id, stack_traces);
 
-        // Extract top frame info from call_stack if available, otherwise fall back
-        let (name, file, line) = call_stack.as_ref().and_then(|stack| stack.first()).map_or_else(
-            || ("execution".to_string(), None, None),
-            |frame| (frame.function.clone(), frame.file.clone(), frame.line),
-        );
+        // Use the first user-code frame as the event name (answers "which of MY
+        // functions is blocking?"). Falls back to top frame if no user code found.
+        let (name, file, line) = call_stack
+            .as_ref()
+            .and_then(|stack| {
+                stack
+                    .iter()
+                    .find(|f| f.is_user_code)
+                    .or_else(|| stack.first())
+            })
+            .map_or_else(
+                || ("execution".to_string(), None, None),
+                |frame| (frame.function.clone(), frame.file.clone(), frame.line),
+            );
 
         TraceEvent {
             name,
@@ -338,14 +388,20 @@ impl<'a> EventProcessor<'a> {
     }
 }
 
-/// Returns `true` if the call stack originates from Tokio's blocking thread pool.
+/// Returns `true` if the call stack originates from Tokio's blocking thread pool
+/// (`spawn_blocking`), as opposed to an async worker thread.
 ///
-/// Blocking pool threads run inside `tokio::runtime::blocking::pool::Inner::run`,
-/// which is their main loop. We match this specific prefix to avoid false positives
-/// from worker threads that merely *call into* the blocking module (e.g., when
-/// invoking `spawn_blocking`, which passes through `Spawner::spawn_blocking`).
+/// Both worker threads and blocking pool threads have `Inner::run` at the bottom
+/// of their stacks because Tokio launches workers via the blocking pool mechanism.
+/// The distinguishing factor is that worker threads also have the multi-thread
+/// scheduler's `worker::` frames, while pure blocking pool threads do not.
 fn is_blocking_pool_stack(call_stack: &[StackFrame]) -> bool {
-    call_stack
+    let has_blocking_pool = call_stack
         .iter()
-        .any(|frame| frame.function.starts_with("tokio::runtime::blocking::pool::Inner"))
+        .any(|frame| frame.function.starts_with("tokio::runtime::blocking::pool::Inner::run"));
+    let has_worker_scheduler = call_stack
+        .iter()
+        .any(|frame| frame.function.contains("scheduler::multi_thread::worker"));
+    // Genuine blocking pool: has Inner::run but NOT the worker scheduler
+    has_blocking_pool && !has_worker_scheduler
 }

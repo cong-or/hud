@@ -302,10 +302,15 @@ async fn run() -> Result<()> {
     if !quiet || args.headless {
         let elapsed = profiling_start.elapsed();
         eprintln!(
-            "\n{}: {:.1}s, {} events",
+            "\n{}: {:.1}s, {} events (perf: {}, stack_ok: {}, stack_fail: {}, sched: {}, pool_filtered: {})",
             exit_reason,
             elapsed.as_secs_f64(),
-            processor.event_count
+            processor.event_count,
+            processor.perf_sample_count,
+            processor.perf_stack_ok,
+            processor.perf_stack_fail,
+            processor.scheduler_event_count,
+            processor.blocking_pool_filtered,
         );
     }
 

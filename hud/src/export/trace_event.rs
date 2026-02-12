@@ -155,6 +155,10 @@ impl TraceEventExporter {
                         serde_json::json!(event.detection_method),
                     );
                 }
+                // Include raw stack_id for diagnostics (negative = error from bpf_get_stackid)
+                if event.stack_id < 0 {
+                    args.insert("stack_id_err".to_string(), serde_json::json!(event.stack_id));
+                }
                 // Add source location if available
                 if let Some(file_path) = file {
                     args.insert("file".to_string(), serde_json::json!(file_path));

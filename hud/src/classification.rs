@@ -120,6 +120,12 @@ pub fn classify_frame(function: &str, file: Option<&str>, in_executable: bool) -
             return FrameOrigin::StdLib;
         }
 
+        // Rust dependency directories (containerized/CI builds, non-standard layouts)
+        // e.g., /rust/deps/hashbrown-0.15.4/src/raw/mod.rs
+        if path.contains("/deps/") || path.contains("/vendor/") {
+            return FrameOrigin::ThirdParty;
+        }
+
         // Absolute paths to system locations
         if path.starts_with("/usr/") || path.starts_with("/lib/") {
             return FrameOrigin::ThirdParty;
@@ -130,9 +136,12 @@ pub fn classify_frame(function: &str, file: Option<&str>, in_executable: bool) -
             return FrameOrigin::UserCode;
         }
 
-        // Absolute path that didn't match any library pattern - likely user code
-        // e.g., /home/user/myproject/src/main.rs
+        // Absolute path — cross-check against known library function prefixes
+        // to catch misclassified deps in non-standard paths (e.g., /rust/deps/)
         if path.starts_with('/') {
+            if let Some(origin) = classify_by_function_prefix(function) {
+                return origin;
+            }
             return FrameOrigin::UserCode;
         }
     }
