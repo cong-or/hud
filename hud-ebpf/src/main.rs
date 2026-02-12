@@ -283,9 +283,9 @@ fn report_scheduler_blocking(
         cpu_id: get_cpu_id(),
         thread_state,
         task_id,
-        category: 0,         // 0 = general
+        category: 0, // 0 = general
         detection_method: DETECTION_SCHEDULER,
-        is_tokio_worker: 1,  // Only workers trigger scheduler detection
+        is_tokio_worker: 1, // Only workers trigger scheduler detection
         _padding: [0u8; 5],
     };
 

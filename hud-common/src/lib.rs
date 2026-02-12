@@ -32,8 +32,8 @@ pub const EVENT_SCHEDULER_DETECTED: u32 = 3;
 
 /// **Execution Sample**: Worker thread executing on-CPU
 ///
-/// Emitted by: `on_cpu_sample` perf_event at 99 Hz
-/// Detection Method: 4 (perf_event sampling)
+/// Emitted by: `on_cpu_sample` `perf_event` at 99 Hz
+/// Detection Method: 4 (`perf_event` sampling)
 pub const TRACE_EXECUTION_START: u32 = 10;
 
 /// **Execution End**: Worker thread stopped executing
@@ -331,4 +331,3 @@ unsafe impl Pod for ThreadState {}
 #[cfg(feature = "user")]
 #[allow(unsafe_code)]
 unsafe impl Pod for WorkerInfo {}
-

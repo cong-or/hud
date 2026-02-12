@@ -363,12 +363,7 @@ impl<'a> EventProcessor<'a> {
         // functions is blocking?"). Falls back to top frame if no user code found.
         let (name, file, line) = call_stack
             .as_ref()
-            .and_then(|stack| {
-                stack
-                    .iter()
-                    .find(|f| f.is_user_code)
-                    .or_else(|| stack.first())
-            })
+            .and_then(|stack| stack.iter().find(|f| f.is_user_code).or_else(|| stack.first()))
             .map_or_else(
                 || ("execution".to_string(), None, None),
                 |frame| (frame.function.clone(), frame.file.clone(), frame.line),
@@ -399,9 +394,8 @@ fn is_blocking_pool_stack(call_stack: &[StackFrame]) -> bool {
     let has_blocking_pool = call_stack
         .iter()
         .any(|frame| frame.function.starts_with("tokio::runtime::blocking::pool::Inner::run"));
-    let has_worker_scheduler = call_stack
-        .iter()
-        .any(|frame| frame.function.contains("scheduler::multi_thread::worker"));
+    let has_worker_scheduler =
+        call_stack.iter().any(|frame| frame.function.contains("scheduler::multi_thread::worker"));
     // Genuine blocking pool: has Inner::run but NOT the worker scheduler
     has_blocking_pool && !has_worker_scheduler
 }
