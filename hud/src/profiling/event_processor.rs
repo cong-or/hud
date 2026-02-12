@@ -340,9 +340,12 @@ impl<'a> EventProcessor<'a> {
 
 /// Returns `true` if the call stack originates from Tokio's blocking thread pool.
 ///
-/// Stacks from `spawn_blocking` contain frames like
-/// `tokio::runtime::blocking::pool::Inner::run` — we match the common prefix
-/// to filter out threads that are *expected* to block.
+/// Blocking pool threads run inside `tokio::runtime::blocking::pool::Inner::run`,
+/// which is their main loop. We match this specific prefix to avoid false positives
+/// from worker threads that merely *call into* the blocking module (e.g., when
+/// invoking `spawn_blocking`, which passes through `Spawner::spawn_blocking`).
 fn is_blocking_pool_stack(call_stack: &[StackFrame]) -> bool {
-    call_stack.iter().any(|frame| frame.function.starts_with("tokio::runtime::blocking::"))
+    call_stack
+        .iter()
+        .any(|frame| frame.function.starts_with("tokio::runtime::blocking::pool::Inner"))
 }
