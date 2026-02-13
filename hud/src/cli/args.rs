@@ -58,4 +58,8 @@ pub struct Args {
     /// Rolling time window in seconds (omit for all data)
     #[arg(long, default_value = "0", value_name = "SECS")]
     pub window: u64,
+
+    /// Thread name prefix for worker discovery (auto-detected if omitted)
+    #[arg(long, value_name = "PATTERN")]
+    pub workers: Option<String>,
 }

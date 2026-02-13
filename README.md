@@ -92,6 +92,9 @@ sudo hud my-app --threshold 1    # more sensitive
 # Rolling time window (only show last N seconds)
 sudo hud my-app --window 30      # metrics decay when load stops
 
+# Custom Tokio thread names (auto-detected, or override explicitly)
+sudo hud my-app --workers my-io-worker
+
 # Headless mode (CI/scripting) - run for 60 seconds then exit
 sudo hud my-app --headless --export trace.json --duration 60
 ```
@@ -126,7 +129,7 @@ Press `Q` to quit hud.
 - Captures the **victim's** stack, not the **blocker's**—if Task A blocks causing Task B to wait, you see Task B's stack. Look for patterns across multiple traces.
 - System CPU pressure can cause false positives—look for consistent, repeatable traces
 - Lock contention where threads sleep (not spin) may not appear
-- Tokio 1.x only—worker detection relies on thread naming (`tokio-runtime-w`), an implementation detail
+- Tokio 1.x only—worker detection relies on thread naming. Custom thread names (via `thread_name()` or `thread_name_fn()`) are auto-detected; use `--workers <prefix>` to override if auto-detection picks the wrong group
 - See [Troubleshooting](docs/TROUBLESHOOTING.md) for common issues
 
 ## Docs

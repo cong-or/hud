@@ -48,6 +48,12 @@ pub struct EventProcessor<'a> {
     pub perf_stack_fail: usize,
     pub scheduler_event_count: usize,
     pub blocking_pool_filtered: usize,
+    /// TUI pipeline counters: worker events with valid stacks
+    pub tui_worker_events: usize,
+    /// TUI pipeline counters: worker events dropped (no user-code frames)
+    pub tui_no_user_code: usize,
+    /// TUI pipeline counters: events successfully sent to TUI channel
+    pub tui_sent: usize,
     /// Cache for resolved stack traces (bounded by eBPF's 16384 unique stacks)
     stack_cache: StackCache,
 
@@ -81,6 +87,9 @@ impl<'a> EventProcessor<'a> {
             perf_stack_fail: 0,
             scheduler_event_count: 0,
             blocking_pool_filtered: 0,
+            tui_worker_events: 0,
+            tui_no_user_code: 0,
+            tui_sent: 0,
             stack_cache: StackCache::new(),
             stack_resolver,
             symbolizer,
@@ -134,10 +143,14 @@ impl<'a> EventProcessor<'a> {
     ) {
         // Skip events from Tokio's blocking thread pool (spawn_blocking).
         // These threads are expected to block — reporting them is noise.
-        if self
-            .resolve_full_stack(event.stack_id, stack_traces)
-            .as_ref()
-            .is_some_and(|s| is_blocking_pool_stack(s))
+        // Guard with worker_id check: registered workers (worker_id != u32::MAX)
+        // always pass through, since the stack-based filter can false-positive on
+        // worker threads whose scheduler frames weren't captured.
+        if event.worker_id == u32::MAX
+            && self
+                .resolve_full_stack(event.stack_id, stack_traces)
+                .as_ref()
+                .is_some_and(|s| is_blocking_pool_stack(s))
         {
             return;
         }
@@ -156,7 +169,9 @@ impl<'a> EventProcessor<'a> {
     ) {
         // Resolve stack early for blocking pool filtering.
         // Only START events carry meaningful stacks; END events pass through.
+        // Guard with worker_id check: registered workers always pass through.
         if event.event_type == TRACE_EXECUTION_START
+            && event.worker_id == u32::MAX
             && self
                 .resolve_full_stack(event.stack_id, stack_traces)
                 .as_ref()
@@ -185,6 +200,7 @@ impl<'a> EventProcessor<'a> {
             && event.stack_id >= 0
             && event.worker_id != u32::MAX
         {
+            self.tui_worker_events += 1;
             let trace_event = self.convert_to_trace_event(&event, stack_traces);
 
             let has_user_code = trace_event
@@ -196,7 +212,10 @@ impl<'a> EventProcessor<'a> {
                 // Non-blocking send (drop if TUI is slow)
                 if let Some(ref tx) = self.event_tx {
                     let _ = tx.try_send(trace_event);
+                    self.tui_sent += 1;
                 }
+            } else {
+                self.tui_no_user_code += 1;
             }
         }
 

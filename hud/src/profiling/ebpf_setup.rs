@@ -101,11 +101,20 @@ pub fn attach_task_id_uprobe(bpf: &mut Ebpf, target_path: &str, pid: Option<i32>
 
 /// Register Tokio worker threads in the `TOKIO_WORKER_THREADS` eBPF map
 ///
+/// # Arguments
+/// * `bpf` - The loaded eBPF program
+/// * `pid` - Target process ID
+/// * `worker_prefix` - Thread name prefix for discovery, or `None` to auto-detect
+///
 /// # Errors
 /// Returns an error if worker discovery or eBPF map access fails
 #[allow(clippy::cast_sign_loss)]
-pub fn register_tokio_workers(bpf: &mut Ebpf, pid: i32) -> Result<usize> {
-    let workers = identify_tokio_workers(Pid(pid))?;
+pub fn register_tokio_workers(
+    bpf: &mut Ebpf,
+    pid: i32,
+    worker_prefix: Option<&str>,
+) -> Result<usize> {
+    let workers = identify_tokio_workers(Pid(pid), worker_prefix)?;
 
     if workers.is_empty() {
         warn!("No Tokio worker threads found! Make sure the target is a Tokio app.");
@@ -144,11 +153,17 @@ pub fn register_tokio_workers(bpf: &mut Ebpf, pid: i32) -> Result<usize> {
 /// * `bpf` - The loaded eBPF program
 /// * `pid` - Target process ID
 /// * `threshold_ms` - Blocking threshold in milliseconds
+/// * `worker_prefix` - Thread name prefix for discovery, or `None` to auto-detect
 ///
 /// # Errors
 /// Returns an error if eBPF map access, tracepoint attachment, or perf event setup fails
 #[allow(clippy::cast_sign_loss)]
-pub fn setup_scheduler_detection(bpf: &mut Ebpf, pid: i32, threshold_ms: u64) -> Result<usize> {
+pub fn setup_scheduler_detection(
+    bpf: &mut Ebpf,
+    pid: i32,
+    threshold_ms: u64,
+    worker_prefix: Option<&str>,
+) -> Result<usize> {
     const NS_PER_MS: u64 = 1_000_000;
 
     println!("\n🔧 Setting up scheduler-based detection...");
@@ -162,7 +177,7 @@ pub fn setup_scheduler_detection(bpf: &mut Ebpf, pid: i32, threshold_ms: u64) ->
     info!("✓ Set target PID: {pid}");
 
     // 2. Identify and register Tokio worker threads
-    let worker_count = register_tokio_workers(bpf, pid)?;
+    let worker_count = register_tokio_workers(bpf, pid, worker_prefix)?;
 
     // 3. Attach sched_switch tracepoint
     let program: &mut TracePoint = bpf

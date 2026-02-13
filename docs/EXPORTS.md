@@ -19,6 +19,7 @@ sudo hud my-app --headless --export trace.json --duration 60
 | `--duration <secs>` | No | Stop after N seconds. Omit to run until Ctrl+C |
 | `--threshold <ms>` | No | Blocking threshold. Default: 5ms |
 | `--window <secs>` | No | Rolling window (usually not needed for exports) |
+| `--workers <prefix>` | No | Thread name prefix for worker discovery. Auto-detected if omitted |
 
 ### Session length examples
 

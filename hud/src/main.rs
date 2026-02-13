@@ -147,7 +147,8 @@ async fn run() -> Result<()> {
     }
 
     // Setup scheduler-based detection
-    let worker_count = setup_scheduler_detection(&mut bpf, pid, args.threshold)?;
+    let worker_count =
+        setup_scheduler_detection(&mut bpf, pid, args.threshold, args.workers.as_deref())?;
     if !quiet {
         println!("workers: {worker_count}");
     }
@@ -302,7 +303,7 @@ async fn run() -> Result<()> {
     if !quiet || args.headless {
         let elapsed = profiling_start.elapsed();
         eprintln!(
-            "\n{}: {:.1}s, {} events (perf: {}, stack_ok: {}, stack_fail: {}, sched: {}, pool_filtered: {})",
+            "\n{}: {:.1}s, {} events (perf: {}, stack_ok: {}, stack_fail: {}, sched: {}, pool_filtered: {}, tui: {} sent / {} no-user-code)",
             exit_reason,
             elapsed.as_secs_f64(),
             processor.event_count,
@@ -311,6 +312,8 @@ async fn run() -> Result<()> {
             processor.perf_stack_fail,
             processor.scheduler_event_count,
             processor.blocking_pool_filtered,
+            processor.tui_sent,
+            processor.tui_no_user_code,
         );
     }
 

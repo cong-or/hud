@@ -58,7 +58,7 @@ eBPF captures raw addresses. To get function names:
 
 ## Worker Discovery
 
-Identifies Tokio workers by scanning `/proc/<pid>/task/<tid>/comm` for threads named `tokio-runtime-w`. These are registered in an eBPF map for filtering.
+Identifies Tokio workers by scanning `/proc/<pid>/task/<tid>/comm`. First tries the default prefix `tokio-runtime-w`. If no matches, auto-discovers by finding the largest thread group (threads matching `{name}-{N}` or sharing identical truncated names). Use `--workers <prefix>` to override auto-detection. Matched threads are registered in an eBPF map for filtering.
 
 ## Event Flow
 
@@ -75,7 +75,7 @@ TUI runs in separate thread with non-blocking crossbeam channel. Neither thread 
 ## Limitations
 
 - Linux 5.8+ only (eBPF)
-- Tokio only (thread naming)
+- Tokio only (thread naming, configurable via `--workers`)
 - Debug symbols required (DWARF)
 - Root privileges required
 - x86_64/aarch64 only

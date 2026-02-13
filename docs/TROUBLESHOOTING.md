@@ -54,8 +54,9 @@ sudo ./hud my-app
 ## No Events Captured
 
 1. **Not Tokio:** Check for workers: `ps -T -p <PID> | grep tokio-runtime-w`
-2. **Idle app:** Generate load
-3. **Multiple matches:** Use explicit PID: `hud --pid <PID>`
+2. **Custom thread names:** Worker threads are auto-detected, but if detection fails, pass `--workers <prefix>` explicitly (e.g. `--workers my-worker`). Run with `RUST_LOG=warn` to see which threads were found and what prefix to use
+3. **Idle app:** Generate load
+4. **Multiple matches:** Use explicit PID: `hud --pid <PID>`
 
 ## eBPF Build Failures
 
