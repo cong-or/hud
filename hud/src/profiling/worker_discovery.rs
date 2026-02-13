@@ -58,8 +58,7 @@ pub struct WorkerInfo {
 /// skipped — this is expected in a live process.
 fn list_process_threads(pid: Pid) -> Result<Vec<(u32, String)>> {
     let task_dir = format!("/proc/{}/task", pid.0);
-    let entries =
-        fs::read_dir(&task_dir).with_context(|| format!("Failed to read {task_dir}"))?;
+    let entries = fs::read_dir(&task_dir).with_context(|| format!("Failed to read {task_dir}"))?;
 
     Ok(entries
         .filter_map(|entry| {
@@ -67,7 +66,10 @@ fn list_process_threads(pid: Pid) -> Result<Vec<(u32, String)>> {
             let tid = entry.file_name().to_string_lossy().parse::<u32>().ok()?;
             let comm_path = format!("/proc/{}/task/{}/comm", pid.0, tid);
             // Threads may exit between readdir and read — silently skip
-            let comm = fs::read_to_string(comm_path).ok()?.trim().to_string();
+            let mut comm = fs::read_to_string(comm_path).ok()?;
+            // comm files end with \n — truncate in-place to avoid reallocation
+            let trimmed_len = comm.trim_end().len();
+            comm.truncate(trimmed_len);
             Some((tid, comm))
         })
         .collect())
@@ -85,11 +87,7 @@ fn collect_workers(threads: &[(u32, String)], prefix: &str) -> Vec<WorkerInfo> {
         .enumerate()
         .map(|(idx, (tid, comm))| {
             log::info!("Found worker thread: TID {tid} ({comm}) → worker_id {idx}");
-            WorkerInfo {
-                tid: Tid(*tid),
-                worker_id: idx as u32,
-                comm: comm.clone(),
-            }
+            WorkerInfo { tid: Tid(*tid), worker_id: idx as u32, comm: comm.clone() }
         })
         .collect()
 }
@@ -179,9 +177,7 @@ fn log_discovery_failure(
             log::warn!("Hint: try --workers {hint}");
         }
         _ => {
-            log::warn!(
-                "If your Tokio runtime uses custom thread names, pass --workers <prefix>."
-            );
+            log::warn!("If your Tokio runtime uses custom thread names, pass --workers <prefix>.");
         }
     }
 }
@@ -298,10 +294,7 @@ mod tests {
             (4, "my-pool-2".to_string()),
             (5, "signal-handler".to_string()),
         ];
-        assert_eq!(
-            discover_worker_prefix(&threads),
-            Some("my-pool".to_string())
-        );
+        assert_eq!(discover_worker_prefix(&threads), Some("my-pool".to_string()));
     }
 
     #[test]
@@ -315,10 +308,7 @@ mod tests {
             (4, "tokio-runtime-w".to_string()),
             (5, "tokio-runtime-b".to_string()),
         ];
-        assert_eq!(
-            discover_worker_prefix(&threads),
-            Some("tokio-runtime-w".to_string())
-        );
+        assert_eq!(discover_worker_prefix(&threads), Some("tokio-runtime-w".to_string()));
     }
 
     #[test]
@@ -332,10 +322,7 @@ mod tests {
             (5, "big-2".to_string()),
             (6, "big-3".to_string()),
         ];
-        assert_eq!(
-            discover_worker_prefix(&threads),
-            Some("big".to_string())
-        );
+        assert_eq!(discover_worker_prefix(&threads), Some("big".to_string()));
     }
 
     #[test]

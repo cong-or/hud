@@ -241,8 +241,22 @@ async fn dns_lookup_good() -> Json<DnsResponse> {
 // MAIN
 // ============================================================================
 
-#[tokio::main]
-async fn main() {
+fn main() {
+    // Allow overriding Tokio's thread name via THREAD_NAME env var.
+    // Useful for testing hud's --workers flag and auto-discovery:
+    //   THREAD_NAME=my-worker ./target/debug/examples/demo-server
+    let thread_name = std::env::var("THREAD_NAME").unwrap_or_default();
+
+    let mut builder = tokio::runtime::Builder::new_multi_thread();
+    builder.enable_all();
+    if !thread_name.is_empty() {
+        builder.thread_name(&thread_name);
+    }
+    let runtime = builder.build().unwrap();
+    runtime.block_on(async_main());
+}
+
+async fn async_main() {
     // BAD versions (for demonstrating hud)
     let app = Router::new()
         .route("/hash", post(hash_password_bad))
