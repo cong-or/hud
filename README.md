@@ -92,7 +92,7 @@ sudo hud my-app --threshold 1    # more sensitive
 # Rolling time window (only show last N seconds)
 sudo hud my-app --window 30      # metrics decay when load stops
 
-# Custom Tokio thread names (auto-detected, or override explicitly)
+# Custom Tokio thread names are auto-detected. Override if needed:
 sudo hud my-app --workers my-io-worker
 
 # Headless mode (CI/scripting) - run for 60 seconds then exit

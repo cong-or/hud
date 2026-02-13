@@ -4,7 +4,7 @@
 
 ```bash
 uname -r                           # Kernel 5.8+ required
-ps -T -p <PID> | grep tokio        # Verify Tokio workers exist
+ps -T -p <PID>                     # List all threads (look for worker pool)
 readlink -f /proc/<PID>/exe        # Get actual binary path
 ```
 
@@ -51,12 +51,42 @@ Then rebuild your application. The Debug % should rise to 80-100%.
 sudo ./hud my-app
 ```
 
+## Workers: 0
+
+If hud prints `workers: 0`, it couldn't find Tokio worker threads. No events will be captured.
+
+**Step 1: Check what threads exist**
+```bash
+ps -T -p <PID>
+```
+
+Default Tokio threads are named `tokio-runtime-w`. Custom runtimes using `thread_name("my-pool")` produce `my-pool-0`, `my-pool-1`, etc.
+
+**Step 2: hud auto-detects custom names**
+
+In most cases, hud finds the right threads automatically — it looks for the largest group of threads matching `{name}-{N}` patterns. If the output shows `workers: 0` despite threads being visible in `ps`, auto-detection may have picked the wrong group.
+
+**Step 3: Override with --workers**
+```bash
+sudo hud my-app --workers my-pool
+```
+
+Pass the prefix that matches your worker threads (everything before the `-N` suffix).
+
+**Step 4: Debug with RUST_LOG**
+```bash
+RUST_LOG=warn sudo hud my-app
+```
+
+This shows which threads were found and suggests the right `--workers` prefix.
+
 ## No Events Captured
 
-1. **Not Tokio:** Check for workers: `ps -T -p <PID> | grep tokio-runtime-w`
-2. **Custom thread names:** Worker threads are auto-detected, but if detection fails, pass `--workers <prefix>` explicitly (e.g. `--workers my-worker`). Run with `RUST_LOG=warn` to see which threads were found and what prefix to use
-3. **Idle app:** Generate load
-4. **Multiple matches:** Use explicit PID: `hud --pid <PID>`
+If `workers: N` looks correct but you still see zero events:
+
+1. **Idle app:** Generate load — hud only captures events when workers are active
+2. **Multiple matches:** Use explicit PID: `hud --pid <PID>`
+3. **Threshold too high:** Try `--threshold 1` to catch shorter blocks
 
 ## eBPF Build Failures
 
