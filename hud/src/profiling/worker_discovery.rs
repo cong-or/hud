@@ -31,7 +31,7 @@ use crate::domain::{Pid, Tid};
 ///
 /// Tokio names workers `tokio-runtime-worker-{N}`, but `/proc/*/comm` truncates
 /// at 15 characters (`TASK_COMM_LEN`), so all workers appear as `tokio-runtime-w`.
-const DEFAULT_PREFIX: &str = "tokio-runtime-w";
+pub const DEFAULT_PREFIX: &str = "tokio-runtime-w";
 
 /// Minimum number of threads in a group to qualify as a worker pool.
 /// A single thread is never a pool; two is the minimum useful Tokio runtime.
@@ -56,7 +56,10 @@ pub struct WorkerInfo {
 /// Scans `/proc/<pid>/task/` and reads each thread's `comm` file.
 /// Threads that vanish between `readdir` and reading `comm` are silently
 /// skipped — this is expected in a live process.
-fn list_process_threads(pid: Pid) -> Result<Vec<(u32, String)>> {
+///
+/// # Errors
+/// Returns an error if `/proc/<pid>/task/` cannot be read.
+pub fn list_process_threads(pid: Pid) -> Result<Vec<(u32, String)>> {
     let task_dir = format!("/proc/{}/task", pid.0);
     let entries = fs::read_dir(&task_dir).with_context(|| format!("Failed to read {task_dir}"))?;
 
@@ -79,8 +82,9 @@ fn list_process_threads(pid: Pid) -> Result<Vec<(u32, String)>> {
 ///
 /// Worker IDs are assigned in the order threads are encountered (0, 1, 2, ...).
 /// This ordering is arbitrary but stable within a single scan.
+#[must_use]
 #[allow(clippy::cast_possible_truncation)]
-fn collect_workers(threads: &[(u32, String)], prefix: &str) -> Vec<WorkerInfo> {
+pub fn collect_workers(threads: &[(u32, String)], prefix: &str) -> Vec<WorkerInfo> {
     threads
         .iter()
         .filter(|(_, comm)| comm.starts_with(prefix))
@@ -120,7 +124,8 @@ fn strip_numeric_suffix(name: &str) -> Option<&str> {
 /// - **Numbered**: `my-pool-0`, `my-pool-1` → base name `my-pool`
 /// - **Truncated**: `tokio-runtime-w`, `tokio-runtime-w` → base name
 ///   `tokio-runtime-w` (all workers share identical truncated comm)
-fn discover_worker_prefix(threads: &[(u32, String)]) -> Option<String> {
+#[must_use]
+pub fn discover_worker_prefix(threads: &[(u32, String)]) -> Option<String> {
     // Count threads per base name. Borrows from `threads` to avoid allocation.
     let mut groups: HashMap<&str, usize> = HashMap::new();
 

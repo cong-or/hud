@@ -7,7 +7,8 @@
 //! - [`load_ebpf_program()`] - Load eBPF bytecode from embedded binary
 //! - [`attach_task_id_uprobe()`] - Attach uprobe for task ID tracking
 //! - [`register_tokio_workers()`] - Discover and register Tokio worker threads
-//! - [`setup_scheduler_detection()`] - Attach tracepoints and perf events
+//! - [`start_perf_sampling()`] - Set CONFIG and attach `perf_event` sampler
+//! - [`attach_sched_switch()`] - Attach `sched_switch` tracepoint
 //!
 //! ## Attachment Points
 //!
@@ -29,7 +30,11 @@ use hud_common::WorkerInfo;
 use log::{info, warn};
 
 use crate::domain::Pid;
-use crate::profiling::{identify_tokio_workers, online_cpus};
+use crate::profiling::online_cpus;
+use crate::profiling::worker_discovery;
+
+// Alias to distinguish from hud_common::WorkerInfo (the eBPF map struct)
+use crate::profiling::WorkerInfo as DiscoveredWorker;
 
 /// Load the eBPF program binary
 ///
@@ -99,7 +104,10 @@ pub fn attach_task_id_uprobe(bpf: &mut Ebpf, target_path: &str, pid: Option<i32>
     Ok(task_id_attached)
 }
 
-/// Register Tokio worker threads in the `TOKIO_WORKER_THREADS` eBPF map
+/// Register Tokio worker threads in the `TOKIO_WORKER_THREADS` eBPF map.
+///
+/// Uses `identify_tokio_workers` to discover workers by thread name, then
+/// registers them in the eBPF map.
 ///
 /// # Arguments
 /// * `bpf` - The loaded eBPF program
@@ -114,10 +122,24 @@ pub fn register_tokio_workers(
     pid: i32,
     worker_prefix: Option<&str>,
 ) -> Result<usize> {
-    let workers = identify_tokio_workers(Pid(pid), worker_prefix)?;
+    let workers = worker_discovery::identify_tokio_workers(Pid(pid), worker_prefix)?;
+    register_workers_in_ebpf(bpf, pid, &workers)
+}
 
+/// Register a pre-discovered list of workers in the `TOKIO_WORKER_THREADS` eBPF map.
+///
+/// This is the low-level registration function used by both `register_tokio_workers`
+/// (name-based discovery) and the stack-based discovery path in `main.rs`.
+///
+/// # Errors
+/// Returns an error if eBPF map access fails
+#[allow(clippy::cast_sign_loss)]
+pub fn register_workers_in_ebpf(
+    bpf: &mut Ebpf,
+    pid: i32,
+    workers: &[DiscoveredWorker],
+) -> Result<usize> {
     if workers.is_empty() {
-        warn!("No Tokio worker threads found! Make sure the target is a Tokio app.");
         return Ok(0);
     }
 
@@ -125,7 +147,7 @@ pub fn register_tokio_workers(
         bpf.map_mut("TOKIO_WORKER_THREADS").context("TOKIO_WORKER_THREADS map not found")?,
     )?;
 
-    for worker in &workers {
+    for worker in workers {
         let mut comm = [0u8; 16];
         let bytes = worker.comm.as_bytes();
         let copy_len = bytes.len().min(16);
@@ -146,29 +168,24 @@ pub fn register_tokio_workers(
     Ok(workers.len())
 }
 
-/// Setup scheduler-based blocking detection
-/// Returns the number of worker threads registered
+/// Start perf-event sampling: set CONFIG map and attach `perf_event` sampler.
+///
+/// This is phase 1 of scheduler detection setup. It starts the CPU sampler
+/// so that stack traces can be collected for stack-based worker discovery
+/// before `sched_switch` is attached.
 ///
 /// # Arguments
 /// * `bpf` - The loaded eBPF program
 /// * `pid` - Target process ID
 /// * `threshold_ms` - Blocking threshold in milliseconds
-/// * `worker_prefix` - Thread name prefix for discovery, or `None` to auto-detect
 ///
 /// # Errors
-/// Returns an error if eBPF map access, tracepoint attachment, or perf event setup fails
+/// Returns an error if eBPF map access or perf event setup fails
 #[allow(clippy::cast_sign_loss)]
-pub fn setup_scheduler_detection(
-    bpf: &mut Ebpf,
-    pid: i32,
-    threshold_ms: u64,
-    worker_prefix: Option<&str>,
-) -> Result<usize> {
+pub fn start_perf_sampling(bpf: &mut Ebpf, pid: i32, threshold_ms: u64) -> Result<()> {
     const NS_PER_MS: u64 = 1_000_000;
 
-    println!("\n🔧 Setting up scheduler-based detection...");
-
-    // 1. Set configuration (threshold and target PID)
+    // Set configuration (threshold and target PID)
     let mut config_map: HashMap<_, u32, u64> =
         HashMap::try_from(bpf.map_mut("CONFIG").context("CONFIG map not found")?)?;
     config_map.insert(0, threshold_ms.saturating_mul(NS_PER_MS), 0)?; // threshold in nanoseconds
@@ -176,19 +193,7 @@ pub fn setup_scheduler_detection(
     info!("✓ Set blocking threshold: {threshold_ms}ms");
     info!("✓ Set target PID: {pid}");
 
-    // 2. Identify and register Tokio worker threads
-    let worker_count = register_tokio_workers(bpf, pid, worker_prefix)?;
-
-    // 3. Attach sched_switch tracepoint
-    let program: &mut TracePoint = bpf
-        .program_mut("sched_switch_hook")
-        .context("sched_switch_hook program not found")?
-        .try_into()?;
-    program.load()?;
-    program.attach("sched", "sched_switch")?;
-    info!("✓ Attached tracepoint: sched/sched_switch");
-
-    // 4. Attach CPU sampling perf_event for stack traces
+    // Attach CPU sampling perf_event for stack traces
     let program: &mut PerfEvent =
         bpf.program_mut("on_cpu_sample").context("on_cpu_sample program not found")?.try_into()?;
     program.load()?;
@@ -215,9 +220,23 @@ pub fn setup_scheduler_detection(
         pid
     );
 
-    println!("✅ Scheduler-based detection active");
-    println!("   Monitoring {worker_count} Tokio worker threads");
-    println!("   CPU sampling: 99 Hz (every ~10ms)\n");
+    Ok(())
+}
 
-    Ok(worker_count)
+/// Attach `sched_switch` tracepoint for scheduler-based blocking detection.
+///
+/// This is phase 2 of scheduler detection setup, called after worker
+/// discovery is complete and workers are registered in the eBPF map.
+///
+/// # Errors
+/// Returns an error if tracepoint attachment fails
+pub fn attach_sched_switch(bpf: &mut Ebpf) -> Result<()> {
+    let program: &mut TracePoint = bpf
+        .program_mut("sched_switch_hook")
+        .context("sched_switch_hook program not found")?
+        .try_into()?;
+    program.load()?;
+    program.attach("sched", "sched_switch")?;
+    info!("✓ Attached tracepoint: sched/sched_switch");
+    Ok(())
 }

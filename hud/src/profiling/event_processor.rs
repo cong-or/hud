@@ -143,15 +143,16 @@ impl<'a> EventProcessor<'a> {
     ) {
         // Skip events from Tokio's blocking thread pool (spawn_blocking).
         // These threads are expected to block — reporting them is noise.
-        // Guard with worker_id check: registered workers (worker_id != u32::MAX)
-        // always pass through, since the stack-based filter can false-positive on
-        // worker threads whose scheduler frames weren't captured.
-        if event.worker_id == u32::MAX
+        // Applied universally (not just unregistered threads): see
+        // `is_blocking_pool_stack` doc comment for why this cannot false-positive
+        // on actual worker threads.
+        if event.stack_id >= 0
             && self
                 .resolve_full_stack(event.stack_id, stack_traces)
                 .as_ref()
                 .is_some_and(|s| is_blocking_pool_stack(s))
         {
+            self.blocking_pool_filtered += 1;
             return;
         }
 
@@ -169,9 +170,10 @@ impl<'a> EventProcessor<'a> {
     ) {
         // Resolve stack early for blocking pool filtering.
         // Only START events carry meaningful stacks; END events pass through.
-        // Guard with worker_id check: registered workers always pass through.
+        // Applied universally: see `is_blocking_pool_stack` doc comment for
+        // why this cannot false-positive on actual worker threads.
         if event.event_type == TRACE_EXECUTION_START
-            && event.worker_id == u32::MAX
+            && event.stack_id >= 0
             && self
                 .resolve_full_stack(event.stack_id, stack_traces)
                 .as_ref()
@@ -409,6 +411,15 @@ impl<'a> EventProcessor<'a> {
 /// of their stacks because Tokio launches workers via the blocking pool mechanism.
 /// The distinguishing factor is that worker threads also have the multi-thread
 /// scheduler's `worker::` frames, while pure blocking pool threads do not.
+///
+/// # Why universal application is safe
+///
+/// This filter is applied to all events regardless of `worker_id`. It cannot
+/// false-positive on actual worker threads because eBPF captures stacks
+/// top-to-bottom: in the Tokio call chain, `worker::run` sits above
+/// `Inner::run`. If `Inner::run` is captured in the stack, `worker::run` will
+/// also be captured. Therefore a genuine worker thread will always have the
+/// `scheduler::multi_thread::worker` frame and will NOT match this filter.
 fn is_blocking_pool_stack(call_stack: &[StackFrame]) -> bool {
     let has_blocking_pool = call_stack
         .iter()

@@ -16,12 +16,14 @@ pub mod event_display;
 pub mod event_processor;
 pub mod stack_resolver;
 pub mod worker_discovery;
+pub mod worker_sampling;
 
 // Re-export common types
 pub use cpu_utils::online_cpus;
 pub use diagnostics::print_perf_event_diagnostics;
 pub use ebpf_setup::{
-    attach_task_id_uprobe, init_ebpf_logger, load_ebpf_program, setup_scheduler_detection,
+    attach_sched_switch, attach_task_id_uprobe, init_ebpf_logger, load_ebpf_program,
+    register_tokio_workers, register_workers_in_ebpf, start_perf_sampling,
 };
 pub use event_display::{
     display_execution_event, display_progress, display_scheduler_detected, display_statistics,
@@ -30,6 +32,7 @@ pub use event_display::{
 pub use event_processor::EventProcessor;
 pub use stack_resolver::StackResolver;
 pub use worker_discovery::{identify_tokio_workers, WorkerInfo};
+pub use worker_sampling::discover_workers_from_stacks;
 
 // Re-export MemoryRange from symbolization for convenience
 pub use crate::symbolization::MemoryRange;
