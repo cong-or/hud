@@ -195,7 +195,7 @@ async fn run() -> Result<()> {
     check_proc_access(pid)?;
 
     if !quiet {
-        println!("hud v0.1.0");
+        println!("hud v{}", env!("CARGO_PKG_VERSION"));
         println!("target: {target_path}");
         println!("pid: {pid}");
     }
