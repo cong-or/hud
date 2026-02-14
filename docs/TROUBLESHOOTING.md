@@ -62,9 +62,14 @@ ps -T -p <PID>
 
 Default Tokio threads are named `tokio-runtime-w`. Custom runtimes using `thread_name("my-pool")` produce `my-pool-0`, `my-pool-1`, etc.
 
-**Step 2: hud auto-detects custom names**
+**Step 2: Understand the discovery chain**
 
-In most cases, hud finds the right threads automatically — it looks for the largest group of threads matching `{name}-{N}` patterns. If the output shows `workers: 0` despite threads being visible in `ps`, auto-detection may have picked the wrong group.
+hud tries four methods in order:
+1. Default prefix `tokio-runtime-w`
+2. Stack-based classification (samples stack traces for 500ms, looks for Tokio scheduler frames)
+3. Largest thread group heuristic (`{name}-{N}` patterns)
+
+If all three fail, you see `workers: 0`. Stack-based discovery handles most custom thread names automatically, but requires the target process to be actively running Tokio work during the 500ms sampling window.
 
 **Step 3: Override with --workers**
 ```bash
@@ -75,10 +80,10 @@ Pass the prefix that matches your worker threads (everything before the `-N` suf
 
 **Step 4: Debug with RUST_LOG**
 ```bash
-RUST_LOG=warn sudo hud my-app
+RUST_LOG=info sudo hud my-app
 ```
 
-This shows which threads were found and suggests the right `--workers` prefix.
+This shows each discovery step and which threads were found. Look for lines like `Default prefix found no workers, trying stack-based discovery...` to see where discovery stalled.
 
 ## No Events Captured
 

@@ -58,7 +58,14 @@ eBPF captures raw addresses. To get function names:
 
 ## Worker Discovery
 
-Identifies Tokio workers by scanning `/proc/<pid>/task/<tid>/comm`. First tries the default prefix `tokio-runtime-w`. If no matches, auto-discovers by finding the largest thread group (threads matching `{name}-{N}` or sharing identical truncated names). Use `--workers <prefix>` to override auto-detection. Matched threads are registered in an eBPF map for filtering.
+Identifies Tokio worker threads using a 4-step fallback chain:
+
+1. **Explicit prefix** (`--workers <prefix>`): Match threads whose comm starts with the given prefix. No fallback.
+2. **Default prefix**: Try `tokio-runtime-w` (the standard Tokio thread name, truncated by `/proc`'s 15-char limit).
+3. **Stack-based discovery**: Start the perf-event sampler, collect stack traces for 500ms, and classify each thread by Tokio frame signatures — `scheduler::multi_thread::worker` identifies workers, `blocking::pool::Inner::run` (without worker frames) identifies the blocking pool. This catches custom-named runtimes that the default prefix misses.
+4. **Largest thread group**: Scan `/proc/<pid>/task/*/comm` and pick the biggest group of threads sharing a `{name}-{N}` pattern.
+
+Matched threads are registered in an eBPF map for filtering. The blocking pool filter uses the same frame signatures at runtime to suppress `spawn_blocking` noise from the TUI.
 
 ## Event Flow
 
