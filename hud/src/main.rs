@@ -118,7 +118,7 @@ fn resolve_pid_and_target(args: &Args) -> Result<(i32, String)> {
 /// them in the eBPF map.
 ///
 /// 1. If `--workers <prefix>` was given, use that prefix exclusively.
-/// 2. Try the default prefix `tokio-runtime-w`.
+/// 2. Try the default prefixes (`tokio-runtime-w`, `tokio-rt-worker`).
 /// 3. Stack-based discovery: sample stack traces for 500ms and classify threads.
 /// 4. Largest thread group heuristic (original fallback).
 fn discover_and_register_workers(
@@ -142,11 +142,13 @@ fn discover_and_register_workers(
         return register_workers_in_ebpf(bpf, pid, &workers);
     }
 
-    // Step (b): Try default prefix "tokio-runtime-w"
+    // Step (b): Try default prefixes (covers old and new Tokio naming)
     let threads = worker_discovery::list_process_threads(Pid(pid))?;
-    let workers = worker_discovery::collect_workers(&threads, worker_discovery::DEFAULT_PREFIX);
-    if !workers.is_empty() {
-        return register_workers_in_ebpf(bpf, pid, &workers);
+    for prefix in worker_discovery::DEFAULT_PREFIXES {
+        let workers = worker_discovery::collect_workers(&threads, prefix);
+        if !workers.is_empty() {
+            return register_workers_in_ebpf(bpf, pid, &workers);
+        }
     }
 
     // Step (c): Stack-based discovery (500ms sampling window)

@@ -60,12 +60,12 @@ If hud prints `workers: 0`, it couldn't find Tokio worker threads. No events wil
 ps -T -p <PID>
 ```
 
-Default Tokio threads are named `tokio-runtime-w`. Custom runtimes using `thread_name("my-pool")` produce `my-pool-0`, `my-pool-1`, etc.
+Default Tokio threads are named `tokio-runtime-w` (Tokio ≤ 1.x) or `tokio-rt-worker` (Tokio 1.44+). Custom runtimes using `thread_name("my-pool")` produce `my-pool-0`, `my-pool-1`, etc.
 
 **Step 2: Understand the discovery chain**
 
 hud tries four methods in order:
-1. Default prefix `tokio-runtime-w`
+1. Default prefixes `tokio-runtime-w` / `tokio-rt-worker`
 2. Stack-based classification (samples stack traces for 500ms, looks for Tokio scheduler frames)
 3. Largest thread group heuristic (`{name}-{N}` patterns)
 

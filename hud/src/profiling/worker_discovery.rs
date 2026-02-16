@@ -7,15 +7,17 @@
 //! 1. **Explicit prefix** (`--workers <prefix>`): match threads whose comm
 //!    starts with the given prefix. No fallback — if nothing matches, report
 //!    diagnostics showing all thread names and a suggested prefix.
-//! 2. **Default** (no `--workers`): try `tokio-runtime-w` first. If that
-//!    fails, auto-discover by scanning all threads and picking the largest
-//!    group of 2+ threads sharing a common base name.
+//! 2. **Default** (no `--workers`): try known Tokio prefixes
+//!    (`tokio-runtime-w`, `tokio-rt-worker`). If none match, auto-discover
+//!    by scanning all threads and picking the largest group of 2+ threads
+//!    sharing a common base name.
 //!
 //! ## Why auto-discovery works
 //!
 //! Tokio worker threads follow predictable naming conventions:
-//! - Default: `tokio-runtime-worker-{N}` (truncated to `tokio-runtime-w` in
-//!   `/proc` due to the 15-char `TASK_COMM_LEN` limit)
+//! - Tokio ≤ 1.x: `tokio-runtime-worker-{N}` (truncated to `tokio-runtime-w`
+//!   in `/proc` due to the 15-char `TASK_COMM_LEN` limit)
+//! - Tokio 1.44+: `tokio-rt-worker-{N}` (truncated to `tokio-rt-worker`)
 //! - Custom: `{thread_name}-{N}` (e.g. `my-pool-0`, `my-pool-1`)
 //!
 //! Auto-discovery finds the largest group of threads sharing a common prefix,
@@ -27,11 +29,16 @@ use std::fs;
 
 use crate::domain::{Pid, Tid};
 
-/// Default thread name prefix for standard Tokio runtimes.
+/// Default thread name prefixes for standard Tokio runtimes.
 ///
-/// Tokio names workers `tokio-runtime-worker-{N}`, but `/proc/*/comm` truncates
-/// at 15 characters (`TASK_COMM_LEN`), so all workers appear as `tokio-runtime-w`.
-pub const DEFAULT_PREFIX: &str = "tokio-runtime-w";
+/// Tokio ≤ 1.x names workers `tokio-runtime-worker-{N}`, truncated to
+/// `tokio-runtime-w` by `/proc/*/comm`'s 15-char limit (`TASK_COMM_LEN`).
+///
+/// Tokio 1.44+ (tokio-rs/tokio#7880) shortened this to `tokio-rt-worker-{N}`,
+/// which also truncates to exactly `tokio-rt-worker` (15 chars).
+///
+/// We try both so discovery works across Tokio versions.
+pub const DEFAULT_PREFIXES: &[&str] = &["tokio-runtime-w", "tokio-rt-worker"];
 
 /// Minimum number of threads in a group to qualify as a worker pool.
 /// A single thread is never a pool; two is the minimum useful Tokio runtime.
@@ -191,7 +198,7 @@ fn log_discovery_failure(
 ///
 /// # Discovery strategy
 ///
-/// 1. Try the given prefix (or default `tokio-runtime-w`)
+/// 1. Try the given prefix (or each default prefix in turn)
 /// 2. If nothing matched **and** no explicit prefix was given, auto-discover
 ///    by finding the largest thread group in the process
 /// 3. If still nothing, log diagnostics with all thread names and a hint
@@ -207,11 +214,19 @@ fn log_discovery_failure(
 pub fn identify_tokio_workers(pid: Pid, name_prefix: Option<&str>) -> Result<Vec<WorkerInfo>> {
     let threads = list_process_threads(pid)?;
 
-    // Step 1: Try the explicit or default prefix
-    let prefix = name_prefix.unwrap_or(DEFAULT_PREFIX);
-    let workers = collect_workers(&threads, prefix);
-    if !workers.is_empty() {
-        return Ok(workers);
+    // Step 1: Try the explicit prefix, or each default prefix in turn
+    if let Some(prefix) = name_prefix {
+        let workers = collect_workers(&threads, prefix);
+        if !workers.is_empty() {
+            return Ok(workers);
+        }
+    } else {
+        for prefix in DEFAULT_PREFIXES {
+            let workers = collect_workers(&threads, prefix);
+            if !workers.is_empty() {
+                return Ok(workers);
+            }
+        }
     }
 
     // Step 2: Auto-discover, but only when the user didn't pass --workers.
@@ -221,8 +236,8 @@ pub fn identify_tokio_workers(pid: Pid, name_prefix: Option<&str>) -> Result<Vec
 
     if name_prefix.is_none() {
         if let Some(ref disc_prefix) = discovered {
-            // Skip if discovery found the same prefix we already tried
-            if disc_prefix != DEFAULT_PREFIX {
+            // Skip if discovery found a prefix we already tried
+            if !DEFAULT_PREFIXES.contains(&disc_prefix.as_str()) {
                 let workers = collect_workers(&threads, disc_prefix);
                 if !workers.is_empty() {
                     log::info!(
@@ -237,7 +252,8 @@ pub fn identify_tokio_workers(pid: Pid, name_prefix: Option<&str>) -> Result<Vec
     }
 
     // Step 3: Nothing found — show diagnostics to help the user
-    log_discovery_failure(&threads, prefix, discovered.as_deref());
+    let searched = name_prefix.unwrap_or(DEFAULT_PREFIXES[0]);
+    log_discovery_failure(&threads, searched, discovered.as_deref());
 
     Ok(vec![])
 }
@@ -314,6 +330,18 @@ mod tests {
             (5, "tokio-runtime-b".to_string()),
         ];
         assert_eq!(discover_worker_prefix(&threads), Some("tokio-runtime-w".to_string()));
+    }
+
+    #[test]
+    fn test_discover_prefix_new_tokio_naming() {
+        // Tokio 1.44+ uses `tokio-rt-worker-{N}`, truncated to `tokio-rt-worker`
+        let threads = vec![
+            (1, "main".to_string()),
+            (2, "tokio-rt-worker".to_string()),
+            (3, "tokio-rt-worker".to_string()),
+            (4, "tokio-rt-worker".to_string()),
+        ];
+        assert_eq!(discover_worker_prefix(&threads), Some("tokio-rt-worker".to_string()));
     }
 
     #[test]
