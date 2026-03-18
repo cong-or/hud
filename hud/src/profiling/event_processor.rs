@@ -429,3 +429,122 @@ fn is_blocking_pool_stack(call_stack: &[StackFrame]) -> bool {
     // Genuine blocking pool: has Inner::run but NOT the worker scheduler
     has_blocking_pool && !has_worker_scheduler
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::classification::FrameOrigin;
+
+    /// Build a `StackFrame` with just a function name. File, line, and origin
+    /// are irrelevant to `is_blocking_pool_stack` — it only inspects
+    /// `function`.
+    fn frame(function: &str) -> StackFrame {
+        StackFrame {
+            function: function.to_string(),
+            file: None,
+            line: None,
+            origin: FrameOrigin::Unknown,
+            is_user_code: false,
+        }
+    }
+
+    // ── is_blocking_pool_stack unit tests ─────────────────────────────
+
+    #[test]
+    fn blocking_pool_stack_is_detected() {
+        // A genuine spawn_blocking stack: Inner::run is present, but the
+        // multi-thread worker scheduler frame is NOT.
+        let stack = vec![
+            frame("std::thread::sleep"),
+            frame("myapp::do_blocking_work"),
+            frame("tokio::runtime::blocking::pool::Inner::run"),
+        ];
+        assert!(is_blocking_pool_stack(&stack));
+    }
+
+    #[test]
+    fn worker_thread_stack_is_not_filtered() {
+        // A genuine async worker thread: both Inner::run AND the
+        // multi-thread scheduler worker frame are present. This must NOT
+        // be classified as blocking pool.
+        let stack = vec![
+            frame("myapp::handler::process_request"),
+            frame("tokio::runtime::scheduler::multi_thread::worker::Context::run"),
+            frame("tokio::runtime::blocking::pool::Inner::run"),
+        ];
+        assert!(!is_blocking_pool_stack(&stack));
+    }
+
+    #[test]
+    fn unrelated_stack_is_not_filtered() {
+        // A stack with neither marker frame. User code, standard library,
+        // whatever — should not match.
+        let stack = vec![frame("myapp::main"), frame("std::io::Read::read")];
+        assert!(!is_blocking_pool_stack(&stack));
+    }
+
+    #[test]
+    fn empty_stack_is_not_filtered() {
+        assert!(!is_blocking_pool_stack(&[]));
+    }
+
+    #[test]
+    fn worker_scheduler_alone_is_not_filtered() {
+        // Has the worker scheduler frame but NOT Inner::run.
+        // Unusual in practice, but must not match.
+        let stack = vec![
+            frame("myapp::handler"),
+            frame("tokio::runtime::scheduler::multi_thread::worker::Context::run"),
+        ];
+        assert!(!is_blocking_pool_stack(&stack));
+    }
+
+    #[test]
+    fn inner_run_prefix_variants_match() {
+        // The filter uses starts_with, so any suffix of Inner::run should
+        // match (e.g. closure wrappers, monomorphized generics).
+        let stack = vec![frame("tokio::runtime::blocking::pool::Inner::run::{{closure}}")];
+        assert!(is_blocking_pool_stack(&stack));
+    }
+
+    #[test]
+    fn worker_scheduler_substring_match() {
+        // The filter uses contains(), so the worker scheduler frame can
+        // appear anywhere in the function name (different Tokio versions
+        // may wrap it differently).
+        let stack = vec![
+            frame("tokio::runtime::blocking::pool::Inner::run"),
+            frame("tokio::runtime::scheduler::multi_thread::worker::run"),
+        ];
+        assert!(!is_blocking_pool_stack(&stack));
+    }
+
+    #[test]
+    fn deep_blocking_pool_stack() {
+        // Realistic deep stack from a spawn_blocking task doing sync I/O.
+        let stack = vec![
+            frame("std::sys::pal::unix::fs::File::read"),
+            frame("std::fs::File::read"),
+            frame("myapp::data::load_config"),
+            frame("tokio::runtime::blocking::task::BlockingTask::poll"),
+            frame("tokio::runtime::blocking::pool::Inner::run"),
+            frame("std::thread::Builder::spawn::{{closure}}"),
+        ];
+        assert!(is_blocking_pool_stack(&stack));
+    }
+
+    #[test]
+    fn deep_worker_stack_not_filtered() {
+        // Realistic deep stack from a Tokio worker running async code that
+        // happens to block. Both marker frames present.
+        let stack = vec![
+            frame("bcrypt::bcrypt::hash_with_result"),
+            frame("myapp::handler::hash_password"),
+            frame("hyper::proto::h1::dispatch::Dispatcher::poll_inner"),
+            frame("tokio::runtime::scheduler::multi_thread::worker::Context::run_task"),
+            frame("tokio::runtime::scheduler::multi_thread::worker::Context::run"),
+            frame("tokio::runtime::blocking::pool::Inner::run"),
+        ];
+        assert!(!is_blocking_pool_stack(&stack));
+    }
+}

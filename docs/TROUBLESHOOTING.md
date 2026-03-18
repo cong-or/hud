@@ -65,11 +65,12 @@ Default Tokio threads are named `tokio-runtime-w` (Tokio ≤ 1.x) or `tokio-rt-w
 **Step 2: Understand the discovery chain**
 
 hud tries four methods in order:
-1. Default prefixes `tokio-runtime-w` / `tokio-rt-worker`
-2. Stack-based classification (samples stack traces for 500ms, looks for Tokio scheduler frames)
-3. Largest thread group heuristic (`{name}-{N}` patterns)
+1. **Explicit prefix** (`--workers <prefix>`): match threads whose comm starts with the given prefix. No fallback.
+2. **Default prefixes**: try `tokio-runtime-w` (Tokio ≤ 1.x) and `tokio-rt-worker` (Tokio 1.44+).
+3. **Stack-based classification**: samples stack traces for 500ms, looks for Tokio scheduler frames. Catches custom-named runtimes automatically.
+4. **Largest thread group heuristic**: picks the biggest group of threads sharing a `{name}-{N}` pattern.
 
-If all three fail, you see `workers: 0`. Stack-based discovery handles most custom thread names automatically, but requires the target process to be actively running Tokio work during the 500ms sampling window.
+If all four fail, you see `workers: 0`. Stack-based discovery handles most custom thread names automatically, but requires the target process to be actively running Tokio work during the 500ms sampling window.
 
 **Step 3: Override with --workers**
 ```bash

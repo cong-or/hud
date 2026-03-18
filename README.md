@@ -46,7 +46,7 @@ Use hud to narrow down suspects, then dig deeper with instrumentation if needed.
 
 **System:**
 - Linux 5.8+
-- x86_64 architecture
+- x86_64 or aarch64 architecture
 - Root privileges
 
 **Your application needs debug symbols** (so hud can show function names):
