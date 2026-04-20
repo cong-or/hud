@@ -54,10 +54,10 @@ Use hud to narrow down suspects, then dig deeper with instrumentation if needed.
 # Cargo.toml
 [profile.release]
 debug = true
-force-frame-pointers = true
+frame-pointers = "force-on"
 ```
 
-> `debug = true` adds ~10-20% to binary size. `force-frame-pointers` adds ~1-2% runtime overhead. For production, you can swap in a debug-enabled binary temporarily for investigation.
+> `debug = true` adds ~10-20% to binary size. `frame-pointers` adds ~1-2% runtime overhead. For production, you can swap in a debug-enabled binary temporarily for investigation.
 
 ## Install
 
