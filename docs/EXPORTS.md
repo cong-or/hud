@@ -4,6 +4,12 @@ The live TUI shows functions disappearing from the hotspot list after a fix — 
 
 See [Tuning](TUNING.md) for threshold selection and debugging workflow.
 
+> **Two different JSON outputs.** This page is about `--export`, which writes
+> **Chrome Trace** format for the *self-blocking* hotspots. The separate
+> `--blame --json` mode emits **NDJSON** noisy-neighbour attribution (one object
+> per preemption, then a ranked summary) — a different format for a different
+> question. See the README's `--blame` section for that.
+
 ## Headless Mode
 
 For CI pipelines, automated testing, or unattended profiling sessions:

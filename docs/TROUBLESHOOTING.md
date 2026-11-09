@@ -25,7 +25,7 @@ Add debug symbols to target's `Cargo.toml`:
 ```toml
 [profile.release]
 debug = true
-force-frame-pointers = true
+frame-pointers = "force-on"
 ```
 
 Then rebuild your application. The Debug % should rise to 80-100%.
@@ -123,7 +123,7 @@ cargo install bpf-linker --force
 Only 1-2 frames showing. **Fix:** Add to target's `Cargo.toml`:
 ```toml
 [profile.release]
-force-frame-pointers = true
+frame-pointers = "force-on"
 ```
 
 ## TUI Issues

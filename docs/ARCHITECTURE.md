@@ -31,7 +31,7 @@ How hud works under the hood.
 
 ### sched_switch (tracepoint)
 
-Fires on scheduler context switches. Detects when Tokio workers go ON/OFF CPU and reports blocking when off-CPU duration exceeds the threshold (default: 5ms, configurable via `--threshold`).
+Fires on scheduler context switches. Detects when Tokio workers go ON/OFF CPU and reports when off-CPU duration exceeds the threshold (default: 5ms, configurable via `--threshold`). With `--blame`, it also records the thread switched *in* when a runnable worker was preempted — the culprit, for noisy-neighbour attribution.
 
 ### perf_event (99 Hz sampling)
 
@@ -39,7 +39,10 @@ Periodic CPU sampling for stack traces. 99 Hz avoids aliasing with 100 Hz system
 
 ## Detection Methods
 
-**Scheduler-based:** Monitor off-CPU duration (time in run queue). When a worker returns to CPU after waiting longer than threshold (default 5ms), capture stack trace. High off-CPU time indicates something else was monopolizing the worker—blocking.
+**Scheduler-based:** Monitor off-CPU duration (time in run queue). When a worker returns to CPU after waiting longer than threshold (default 5ms), it wasn't running when it wanted to — for one of two reasons, which hud distinguishes:
+- **Self-inflicted** (default): the worker blocked its own thread (sync I/O, compute, a blocking lock). hud captures the *worker's* stack, so you see which of your functions blocked.
+- **Preemption** (`--blame`): another thread took the core from a runnable worker. hud names that thread — the noisy neighbour — instead of only the victim.
+
 - Pros: No code changes, whole-program visibility
 - Cons: Measures symptom not cause directly; false positives from system CPU pressure
 
