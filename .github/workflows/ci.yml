@@ -43,11 +43,13 @@ jobs:
         run: |
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
-          sudo ./llvm.sh 20
-          echo "/usr/lib/llvm-20/bin" >> "$GITHUB_PATH"
+          sudo ./llvm.sh 21
+          sudo apt-get install -y llvm-21-dev
+          echo "/usr/lib/llvm-21/bin" >> "$GITHUB_PATH"
 
       - name: Install bpf-linker
-        run: cargo install bpf-linker --locked
+        # bpf-linker 0.13 defaults to llvm-23; pin to stable LLVM 21 to match the installed toolchain.
+        run: cargo install bpf-linker --locked --no-default-features --features llvm-21
 
       - name: Build eBPF program
         run: cargo xtask build-ebpf
@@ -76,11 +78,13 @@ jobs:
         run: |
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
-          sudo ./llvm.sh 20
-          echo "/usr/lib/llvm-20/bin" >> "$GITHUB_PATH"
+          sudo ./llvm.sh 21
+          sudo apt-get install -y llvm-21-dev
+          echo "/usr/lib/llvm-21/bin" >> "$GITHUB_PATH"
 
       - name: Install bpf-linker
-        run: cargo install bpf-linker --locked
+        # bpf-linker 0.13 defaults to llvm-23; pin to stable LLVM 21 to match the installed toolchain.
+        run: cargo install bpf-linker --locked --no-default-features --features llvm-21
 
       - name: Build eBPF program
         run: cargo xtask build-ebpf
