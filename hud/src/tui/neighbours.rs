@@ -60,11 +60,7 @@ impl NeighboursPanel {
     /// Build the panel from accumulated blame data.
     #[must_use]
     pub fn new(data: &BlameData) -> Self {
-        Self {
-            rows: data.ranked(),
-            total: data.total(),
-            total_stall_ns: data.total_off_cpu_ns(),
-        }
+        Self { rows: data.ranked(), total: data.total(), total_stall_ns: data.total_off_cpu_ns() }
     }
 
     pub fn render(&self, f: &mut Frame, area: Rect) {
@@ -85,16 +81,16 @@ impl NeighboursPanel {
             )));
         } else {
             for (i, (pid, comm, count)) in self.rows.iter().take(MAX_ROWS).enumerate() {
-                let share = if self.total > 0 {
-                    (*count as f64 / self.total as f64) * 100.0
-                } else {
-                    0.0
-                };
+                let share =
+                    if self.total > 0 { (*count as f64 / self.total as f64) * 100.0 } else { 0.0 };
                 let bar_color = warning_color(share);
                 let name = if comm.is_empty() { "<unknown>" } else { comm.as_str() };
 
                 let mut spans = vec![
-                    Span::styled(format!(" {name:<14.14} {pid:<6} "), Style::default().fg(HUD_CYAN)),
+                    Span::styled(
+                        format!(" {name:<14.14} {pid:<6} "),
+                        Style::default().fg(HUD_CYAN),
+                    ),
                     Span::styled(gauge_bar(share, 8), Style::default().fg(bar_color)),
                     Span::styled(format!(" {count:>4}×"), Style::default().fg(bar_color)),
                 ];
@@ -142,7 +138,7 @@ fn fmt_dur_ns(ns: u64) -> String {
 mod render_tests {
     use super::NeighboursPanel;
     use crate::trace_data::{BlameData, PreemptionEvent};
-    use ratatui::{Terminal, backend::TestBackend};
+    use ratatui::{backend::TestBackend, Terminal};
 
     /// Build a `BlameData` from `(pid, comm, count)` triples.
     fn blame(culprits: &[(u32, &str, u64)]) -> BlameData {

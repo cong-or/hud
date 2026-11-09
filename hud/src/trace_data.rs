@@ -483,7 +483,7 @@ mod blame_tests {
     fn empty_is_clean() {
         let b = BlameData::new();
         assert_eq!(b.total(), 0);
-        assert!(b.ranked().is_empty());
+        assert_eq!(b.ranked(), Vec::new());
     }
 
     #[test]
