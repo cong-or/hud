@@ -39,6 +39,13 @@ jobs:
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
 
+      - name: Install LLVM (bpf-linker build dependency)
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 20
+          echo "/usr/lib/llvm-20/bin" >> "$GITHUB_PATH"
+
       - name: Install bpf-linker
         run: cargo install bpf-linker --locked
 
@@ -64,6 +71,13 @@ jobs:
 
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
+
+      - name: Install LLVM (bpf-linker build dependency)
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 20
+          echo "/usr/lib/llvm-20/bin" >> "$GITHUB_PATH"
 
       - name: Install bpf-linker
         run: cargo install bpf-linker --locked

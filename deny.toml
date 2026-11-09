@@ -3,6 +3,11 @@ ignore = [
     # paste is unmaintained but ratatui hasn't migrated yet
     # https://github.com/ratatui/ratatui/issues/1679
     "RUSTSEC-2024-0436",
+    # ruzstd decompression-bomb DoS, pulled only transitively via `object`
+    # (addr2line/aya) to read zstd debug sections of the *target* binary — never
+    # untrusted input, so unreachable here. Can't bump: object 0.36 pins ruzstd
+    # ^0.7 and its users haven't moved to object 0.37 / ruzstd 0.9.
+    "RUSTSEC-2026-0344",
 ]
 
 [licenses]
