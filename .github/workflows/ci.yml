@@ -39,17 +39,14 @@ jobs:
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Install LLVM (bpf-linker build dependency)
-        run: |
-          wget https://apt.llvm.org/llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 21
-          sudo apt-get install -y llvm-21-dev
-          echo "/usr/lib/llvm-21/bin" >> "$GITHUB_PATH"
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
 
       - name: Install bpf-linker
-        # bpf-linker 0.13 defaults to llvm-23; pin to stable LLVM 21 to match the installed toolchain.
-        run: cargo install bpf-linker --locked --no-default-features --features llvm-21
+        # Prebuilt binary (aya's recommended method). Building from source would
+        # require an LLVM that exactly matches the nightly rustc's LLVM; the
+        # prebuilt bundles the right one.
+        run: cargo binstall -y bpf-linker
 
       - name: Build eBPF program
         run: cargo xtask build-ebpf
@@ -74,17 +71,14 @@ jobs:
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Install LLVM (bpf-linker build dependency)
-        run: |
-          wget https://apt.llvm.org/llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 21
-          sudo apt-get install -y llvm-21-dev
-          echo "/usr/lib/llvm-21/bin" >> "$GITHUB_PATH"
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
 
       - name: Install bpf-linker
-        # bpf-linker 0.13 defaults to llvm-23; pin to stable LLVM 21 to match the installed toolchain.
-        run: cargo install bpf-linker --locked --no-default-features --features llvm-21
+        # Prebuilt binary (aya's recommended method). Building from source would
+        # require an LLVM that exactly matches the nightly rustc's LLVM; the
+        # prebuilt bundles the right one.
+        run: cargo binstall -y bpf-linker
 
       - name: Build eBPF program
         run: cargo xtask build-ebpf

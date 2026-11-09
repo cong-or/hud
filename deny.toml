@@ -8,6 +8,9 @@ ignore = [
     # untrusted input, so unreachable here. Can't bump: object 0.36 pins ruzstd
     # ^0.7 and its users haven't moved to object 0.37 / ruzstd 0.9.
     "RUSTSEC-2026-0344",
+    # pin-utils is unmaintained (repo archived 2026-10-01); a deep transitive
+    # dependency of futures/tokio, not independently removable.
+    "RUSTSEC-2026-0441",
 ]
 
 [licenses]
