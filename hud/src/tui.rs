@@ -51,18 +51,20 @@ use std::time::Duration;
 
 pub mod hotspot; // Public for testing
 mod layout;
+mod neighbours;
 mod status;
 mod theme;
 mod timeline;
 mod workers;
 
 use hotspot::HotspotView;
+use neighbours::NeighboursPanel;
 use status::StatusPanel;
 use theme::{CAUTION_AMBER, CRITICAL_RED, HUD_GREEN, INFO_DIM};
 use timeline::TimelineView;
 use workers::WorkersPanel;
 
-pub use crate::trace_data::{LiveData, TraceData, TraceEvent};
+pub use crate::trace_data::{BlameData, LiveData, PreemptionEvent, TraceData, TraceEvent};
 
 // =============================================================================
 // STYLE CONSTANTS
@@ -967,6 +969,9 @@ struct LiveApp {
 
     /// Rolling time window in seconds. None = show all data, Some(n) = show last n seconds.
     window_secs: Option<f64>,
+
+    /// Accumulated noisy-neighbour attributions (blame mode).
+    blame_data: BlameData,
 }
 
 impl LiveApp {
@@ -982,6 +987,7 @@ impl LiveApp {
             frozen_file_group: None,
             file_drilldown_selected: 0,
             window_secs,
+            blame_data: BlameData::new(),
         }
     }
 
@@ -1179,7 +1185,15 @@ impl LiveApp {
 ///
 /// # Errors
 /// Returns an error if terminal setup or rendering fails
-pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>, window_secs: u64) -> Result<()> {
+pub fn run_live(
+    event_rx: Receiver<TraceEvent>,
+    blame_rx: Option<Receiver<PreemptionEvent>>,
+    pid: Option<i32>,
+    window_secs: u64,
+) -> Result<()> {
+    // Blame mode is active iff the attribution channel was wired up.
+    let blame = blame_rx.is_some();
+
     // -------------------------------------------------------------------------
     // Terminal Setup
     // -------------------------------------------------------------------------
@@ -1212,6 +1226,13 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>, window_secs: u
             app.live_data.add_event(event);
         }
 
+        // Drain attributed preemptions onto the blame accumulator (blame mode).
+        if let Some(ref rx) = blame_rx {
+            while let Ok(ev) = rx.try_recv() {
+                app.blame_data.record(ev);
+            }
+        }
+
         // Snapshot current data for rendering (filtered by window if set)
         let trace_data = app.live_data.as_trace_data(app.window_secs);
 
@@ -1222,6 +1243,7 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>, window_secs: u
 
             let status_panel = StatusPanel::new(&trace_data);
             let workers_panel = WorkersPanel::new(&trace_data);
+            let neighbours_panel = blame.then(|| NeighboursPanel::new(&app.blame_data));
             let timeline_view = TimelineView::new(&trace_data);
             let has_events = !trace_data.events.is_empty();
 
@@ -1347,7 +1369,13 @@ pub fn run_live(event_rx: Receiver<TraceEvent>, pid: Option<i32>, window_secs: u
                     if let Some(ref hv) = app.hotspot_view {
                         hv.render(f, top_cols[1], &trace_data);
                     }
-                    workers_panel.render(f, bottom_cols[0], &trace_data);
+                    // Blame mode swaps the WORKERS slot for NEIGHBOURS (who is
+                    // stealing the workers' CPU). Same slot, same visual grammar.
+                    if let Some(ref np) = neighbours_panel {
+                        np.render(f, bottom_cols[0]);
+                    } else {
+                        workers_panel.render(f, bottom_cols[0], &trace_data);
+                    }
                     timeline_view.render(f, bottom_cols[1], &trace_data);
                 } else {
                     // Compact/minimal: hotspots + timeline, optionally with status panel

@@ -173,6 +173,13 @@ pub struct TaskEvent {
     /// **Note**: May be 0 if `set_task_id_hook` is inlined in release builds.
     pub task_id: u64,
 
+    /// PID of the thread that preempted this worker (noisy-neighbour attribution)
+    ///
+    /// Set on `EVENT_SCHEDULER_DETECTED` events: the thread switched IN when a
+    /// runnable Tokio worker was involuntarily preempted off the CPU. `0` for
+    /// sample events and when no external preemptor was captured.
+    pub culprit_pid: u32,
+
     /// Event category (0=general, 1=database, 2=network, 3=compute)
     ///
     /// Currently always 0 (general). Reserved for future categorization.
@@ -191,7 +198,12 @@ pub struct TaskEvent {
 
     /// Padding for 8-byte alignment
     #[allow(clippy::pub_underscore_fields)]
-    pub _padding: [u8; 5],
+    pub _padding: [u8; 1],
+
+    /// Thread name (comm) of the culprit that preempted this worker.
+    ///
+    /// Paired with `culprit_pid`. NUL-padded, like other comm fields.
+    pub culprit_comm: [u8; 16],
 }
 
 /// Thread execution state (for scheduler-based detection)
@@ -224,6 +236,17 @@ pub struct ThreadState {
     /// - `1` (`TASK_INTERRUPTIBLE`): Yielded (async) → NOT blocking
     /// - `2` (`TASK_UNINTERRUPTIBLE`): Blocked on I/O
     pub state_when_switched: i64,
+
+    /// PID of the thread that preempted this one while it was RUNNABLE.
+    ///
+    /// Captured on `sched_switch` when this thread goes off-CPU with
+    /// `prev_state == 0` (`TASK_RUNNING`): the incoming thread (`next`) is the
+    /// culprit that took the core. Read back if the off-CPU gap becomes a tail
+    /// event, to attribute the noisy neighbour. `0` after a voluntary yield.
+    pub preemptor_pid: u32,
+
+    /// Thread name (comm) of the preemptor. Paired with `preemptor_pid`.
+    pub preemptor_comm: [u8; 16],
 }
 
 /// Tokio worker thread metadata

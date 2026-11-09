@@ -4,7 +4,7 @@
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue)](LICENSE)
 [![Linux 5.8+](https://img.shields.io/badge/Linux-5.8%2B-yellow?logo=linux)](docs/ARCHITECTURE.md)
 
-Find what's blocking your Tokio runtime. Zero-instrumentation eBPF profiler.
+Find out why your Tokio workers stall — your own blocking code, or a neighbour stealing their CPU. Zero-instrumentation eBPF profiler.
 
 > **Linux only.** This tool uses eBPF, which is a Linux kernel feature. It does not work on macOS or Windows.
 
@@ -12,13 +12,21 @@ Find what's blocking your Tokio runtime. Zero-instrumentation eBPF profiler.
 
 ## The Problem
 
-Tokio uses cooperative scheduling. Tasks yield at `.await` points, trusting that work between awaits is fast. When it isn't—CPU-heavy code, sync I/O, blocking locks—one task starves the rest.
+A Tokio worker that should be running your tasks can stall for two reasons:
 
-These bugs are silent. No errors, no panics—just degraded throughput. hud makes them visible.
+1. **Your own code blocks it.** Tokio uses cooperative scheduling—tasks yield at `.await`, trusting that work between awaits is fast. When it isn't—CPU-heavy code, sync I/O, blocking locks—one task starves the rest.
+2. **A neighbour steals its CPU.** On a shared core, another process preempts your *runnable* worker and holds the core. Your tail latency spikes and nothing in your code is at fault.
+
+Both surface as the same symptom—the worker waiting in the kernel run queue instead of running—and both are silent: no errors, no panics, just degraded throughput. hud makes them visible and tells you which one it is.
 
 ## How It Works
 
-Watches the Linux scheduler via eBPF. When a worker thread experiences high OS-level scheduling latency (time the thread waits in the kernel run queue, not Tokio's task queue), captures a stack trace. High scheduling latency is a symptom of blocking—when one task monopolizes a worker, others queue up waiting.
+Watches the Linux scheduler via eBPF. When a worker thread experiences high OS-level scheduling latency (time waiting in the kernel run queue, not Tokio's task queue), hud attributes the cause:
+
+- **Self-inflicted** (default) — captures the worker's stack, so you see *which of your functions* blocked.
+- **Preemption** (`--blame`) — names the thread that held the core when your runnable worker was kicked off: *who* stole it, and how often.
+
+Both are facets of one measurement: why your worker is off-CPU when it should be running.
 
 ## Why hud?
 
@@ -97,6 +105,13 @@ sudo hud my-app --workers my-io-worker
 
 # Headless mode (CI/scripting) - run for 60 seconds then exit
 sudo hud my-app --headless --export trace.json --duration 60
+
+# Who is stealing your workers' CPU? Attribute tail latency to the
+# neighbour process that preempted a runnable worker.
+sudo hud my-app --blame
+
+# Same attribution as machine-readable JSON (for agents / scripts)
+sudo hud my-app --blame --json
 ```
 
 See [Tuning](docs/TUNING.md) for threshold selection guide.
@@ -130,6 +145,7 @@ Press `Q` to quit hud.
 - System CPU pressure can cause false positives—look for consistent, repeatable traces
 - Lock contention where threads sleep (not spin) may not appear
 - Tokio 1.x only. Worker detection tries the default thread name prefix, then stack-based classification (looks for Tokio scheduler frames), then largest thread group heuristic. Use `--workers <prefix>` to skip auto-detection
+- `--blame` attributes *external preemption* only: it names the neighbour that took the core, by preemption **count** (not stolen milliseconds), and can't name another tenant's VM on cloud hosts (only local processes). Self-inflicted blocking is the default stack-capture mode, not `--blame`
 - See [Troubleshooting](docs/TROUBLESHOOTING.md) for common issues
 
 ## Docs

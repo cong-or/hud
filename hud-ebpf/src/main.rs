@@ -179,11 +179,22 @@ fn try_sched_switch(ctx: &TracePointContext) -> Result<(), i64> {
     let prev_pid = unsafe { (*args).prev_pid as u32 };
     let prev_state = unsafe { (*args).prev_state };
     let next_pid = unsafe { (*args).next_pid as u32 };
+    // Read the 16-byte comm via bpf_probe_read (`read_at`) rather than a direct
+    // struct-field copy. Copying an array straight off the tracepoint ctx pointer
+    // compiles to pointer-arithmetic + deref on the ctx ("modified ctx ptr"),
+    // which the BPF verifier rejects. The scalar fields above read fine as fixed
+    // ctx-offset loads; only the array needs the helper.
+    let next_comm = unsafe {
+        ctx.read_at::<[u8; 16]>(core::mem::offset_of!(SchedSwitchArgs, next_comm))
+            .unwrap_or([0u8; 16])
+    };
 
     let now = unsafe { bpf_ktime_get_ns() };
 
-    // Handle thread going OFF CPU (prev_pid)
-    handle_thread_off_cpu(prev_pid, prev_state, now)?;
+    // Handle thread going OFF CPU (prev_pid).
+    // Pass the incoming thread (next) so we can attribute who preempted a
+    // runnable worker — the noisy neighbour that took the core.
+    handle_thread_off_cpu(prev_pid, prev_state, next_pid, next_comm, now)?;
 
     // Handle thread going ON CPU (next_pid)
     handle_thread_on_cpu(next_pid, now, ctx)?;
@@ -191,12 +202,33 @@ fn try_sched_switch(ctx: &TracePointContext) -> Result<(), i64> {
     Ok(())
 }
 
-fn handle_thread_off_cpu(tid: u32, state: i64, now: u64) -> Result<(), i64> {
+fn handle_thread_off_cpu(
+    tid: u32,
+    state: i64,
+    next_pid: u32,
+    next_comm: [u8; 16],
+    now: u64,
+) -> Result<(), i64> {
     // Update thread state for blocking detection
     let mut thread_state = unsafe { THREAD_STATE.get(&tid).copied().unwrap_or_default() };
 
     thread_state.last_off_cpu_ns = now;
     thread_state.state_when_switched = state;
+
+    // Noisy-neighbour attribution: when a thread is preempted while RUNNABLE
+    // (TASK_RUNNING, state == 0), the thread switching IN (next) is the one that
+    // took the core. Stash it on the outgoing thread's state so the on-CPU path
+    // can name the culprit if this becomes a tail event. Voluntary yields
+    // (state != 0) clear it — they were not stolen from. We stash for every
+    // thread (not just workers) to avoid a worker-map lookup on this hot path;
+    // it is only ever read back for workers that cross the blocking threshold.
+    if state == 0 {
+        thread_state.preemptor_pid = next_pid;
+        thread_state.preemptor_comm = next_comm;
+    } else {
+        thread_state.preemptor_pid = 0;
+        thread_state.preemptor_comm = [0u8; 16];
+    }
 
     unsafe {
         THREAD_STATE.insert(&tid, &thread_state, 0)?;
@@ -244,6 +276,8 @@ fn handle_thread_on_cpu(tid: u32, now: u64, _ctx: &TracePointContext) -> Result<
                 thread_state.off_cpu_duration,
                 stack_id,
                 thread_state.state_when_switched,
+                thread_state.preemptor_pid,
+                thread_state.preemptor_comm,
             )?;
         }
     }
@@ -268,9 +302,15 @@ fn report_scheduler_blocking(
     duration_ns: u64,
     stack_id: i64,
     thread_state: i64,
+    culprit_pid: u32,
+    culprit_comm: [u8; 16],
 ) -> Result<(), i64> {
-    let pid_tgid = unsafe { bpf_get_current_pid_tgid() };
-    let pid = (pid_tgid >> 32) as u32;
+    // Victim tgid = the worker's OWN process, from its registration. Do NOT use
+    // bpf_get_current_pid_tgid() here: at the sched_switch tracepoint `current` is
+    // still `prev` (the task switched OUT), which at the moment we report — the
+    // worker coming back ON cpu — is typically the culprit, not the worker. Using
+    // it made victim_pid wrongly equal the preemptor's pid.
+    let pid = unsafe { TOKIO_WORKER_THREADS.get(&tid).map(|w| w.pid).unwrap_or(0) };
 
     let event = TaskEvent {
         pid,
@@ -283,10 +323,12 @@ fn report_scheduler_blocking(
         cpu_id: get_cpu_id(),
         thread_state,
         task_id,
+        culprit_pid,
         category: 0, // 0 = general
         detection_method: DETECTION_SCHEDULER,
         is_tokio_worker: 1, // Only workers trigger scheduler detection
-        _padding: [0u8; 5],
+        _padding: [0u8; 1],
+        culprit_comm,
     };
 
     unsafe {
@@ -373,10 +415,12 @@ fn try_on_cpu_sample(ctx: &PerfEventContext) -> Result<(), i64> {
         cpu_id,
         thread_state: 0,
         task_id,
+        culprit_pid: 0,
         category: 0,
         detection_method: DETECTION_PERF_SAMPLE,
         is_tokio_worker: 1,
-        _padding: [0u8; 5],
+        _padding: [0u8; 1],
+        culprit_comm: [0u8; 16],
     };
 
     let output_result = unsafe { EVENTS.output(&event, 0) };

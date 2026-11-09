@@ -383,3 +383,131 @@ impl LiveData {
         }
     }
 }
+
+// =============================================================================
+// NOISY-NEIGHBOUR ATTRIBUTION (blame mode)
+// =============================================================================
+
+/// A single attributed preemption: a runnable Tokio worker was cut off the CPU,
+/// and `culprit_*` names the thread that took the core.
+///
+/// Produced from `EVENT_SCHEDULER_DETECTED` events when `--blame` is active and
+/// an external preemptor was captured. Sent to the TUI on its own channel so it
+/// never pollutes the hotspot/worker sample streams.
+#[derive(Debug, Clone)]
+pub struct PreemptionEvent {
+    /// Tokio worker that was preempted (the victim).
+    pub worker_id: u32,
+    /// PID of the thread that preempted it (the culprit).
+    pub culprit_pid: u32,
+    /// Resolved thread name of the culprit.
+    pub culprit_comm: String,
+    /// The victim worker's own off-CPU gap for this preemption (ns). Summed for
+    /// a severity signal — NOT attributed as "stolen by" the culprit.
+    pub off_cpu_ns: u64,
+}
+
+/// Accumulates attributed preemptions for the NEIGHBOURS panel.
+///
+/// Counts per culprit — deliberately NOT stolen-time. The immediate preemptor
+/// proves *who* cut in, not that it held the core for the whole off-CPU gap, so
+/// duration attribution would over-claim. Counts + N are the honest, provable
+/// signal (see `hud-noisy-neighbour-tool.md`).
+#[derive(Debug, Default)]
+pub struct BlameData {
+    /// culprit pid -> (comm, preemption count)
+    culprits: HashMap<u32, (String, u64)>,
+    /// Total attributed preemptions seen this session.
+    total: u64,
+    /// Total victim off-CPU time across those preemptions (ns) — a measured
+    /// severity signal, not a per-culprit attribution.
+    total_off_cpu_ns: u64,
+}
+
+impl BlameData {
+    /// Create an empty accumulator.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record one attributed preemption.
+    pub fn record(&mut self, ev: PreemptionEvent) {
+        self.total += 1;
+        self.total_off_cpu_ns += ev.off_cpu_ns;
+        let entry =
+            self.culprits.entry(ev.culprit_pid).or_insert_with(|| (ev.culprit_comm.clone(), 0));
+        entry.1 += 1;
+        // Keep the comm fresh if the first sighting had an empty name.
+        if entry.0.is_empty() && !ev.culprit_comm.is_empty() {
+            entry.0 = ev.culprit_comm;
+        }
+    }
+
+    /// Total attributed preemptions.
+    #[must_use]
+    pub fn total(&self) -> u64 {
+        self.total
+    }
+
+    /// Total victim off-CPU time across all attributed preemptions (ns).
+    #[must_use]
+    pub fn total_off_cpu_ns(&self) -> u64 {
+        self.total_off_cpu_ns
+    }
+
+    /// Culprits ranked by preemption count, highest first: `(pid, comm, count)`.
+    #[must_use]
+    pub fn ranked(&self) -> Vec<(u32, String, u64)> {
+        let mut v: Vec<(u32, String, u64)> =
+            self.culprits.iter().map(|(&pid, (comm, n))| (pid, comm.clone(), *n)).collect();
+        v.sort_unstable_by_key(|row| std::cmp::Reverse(row.2));
+        v
+    }
+}
+
+#[cfg(test)]
+mod blame_tests {
+    use super::{BlameData, PreemptionEvent};
+
+    fn ev(pid: u32, comm: &str) -> PreemptionEvent {
+        PreemptionEvent {
+            worker_id: 0,
+            culprit_pid: pid,
+            culprit_comm: comm.to_string(),
+            off_cpu_ns: 4_000_000,
+        }
+    }
+
+    #[test]
+    fn empty_is_clean() {
+        let b = BlameData::new();
+        assert_eq!(b.total(), 0);
+        assert!(b.ranked().is_empty());
+    }
+
+    #[test]
+    fn ranks_culprits_by_count() {
+        let mut b = BlameData::new();
+        for _ in 0..3 {
+            b.record(ev(10, "log-flusher"));
+        }
+        b.record(ev(20, "metrics-agent"));
+        assert_eq!(b.total(), 4);
+
+        let ranked = b.ranked();
+        assert_eq!(ranked.len(), 2);
+        // Highest count first: the top thief is pid 10 with 3 preemptions.
+        assert_eq!((ranked[0].0, ranked[0].1.as_str(), ranked[0].2), (10, "log-flusher", 3));
+        assert_eq!((ranked[1].0, ranked[1].2), (20, 1));
+    }
+
+    #[test]
+    fn backfills_a_name_seen_late() {
+        // First sighting had no comm (kernel raced); a later one supplies it.
+        let mut b = BlameData::new();
+        b.record(ev(5, ""));
+        b.record(ev(5, "late-name"));
+        assert_eq!(b.ranked()[0].1, "late-name");
+    }
+}
