@@ -22,7 +22,6 @@ THRESHOLD GUIDE:
     Lower = more sensitive (more events, potential noise)
     Higher = less sensitive (only obvious problems)"
 )]
-#[allow(clippy::struct_excessive_bools)] // CLI flag struct; bools are the flags
 pub struct Args {
     /// Process name to profile (auto-detects PID and binary)
     #[arg(value_name = "PROCESS")]
@@ -63,21 +62,4 @@ pub struct Args {
     /// Thread name prefix for worker discovery (auto-detected if omitted)
     #[arg(long, value_name = "PATTERN")]
     pub workers: Option<String>,
-
-    /// Attribute tail latency to the noisy neighbour that preempted your workers.
-    ///
-    /// Adds a NEIGHBOURS panel naming which other threads cut your runnable
-    /// workers off the CPU, and how often (counts, not stolen time — the honest
-    /// signal). Live TUI by default; see `--json` for the agent surface.
-    #[arg(long)]
-    pub blame: bool,
-
-    /// Emit machine-readable JSON for an agent instead of the TUI (use with `--blame`).
-    ///
-    /// Streams one NDJSON object per attributed preemption to stdout (full
-    /// richness: timestamp, cpu, the victim's own off-CPU gap, culprit id/comm),
-    /// then a final ranked `summary` object. Implies no TUI. This is the surface
-    /// an agent reasons over to find patterns a human glance would miss.
-    #[arg(long, requires = "blame")]
-    pub json: bool,
 }

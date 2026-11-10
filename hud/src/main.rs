@@ -185,9 +185,7 @@ fn discover_and_register_workers(
 async fn run() -> Result<()> {
     let args = Args::parse();
 
-    // JSON (agent) mode keeps stdout clean for the NDJSON stream: suppress the
-    // human banner/progress lines.
-    let quiet = args.quiet || args.json;
+    let quiet = args.quiet;
 
     // Live profiling (with or without TUI)
     // Resolve PID and target path from arguments
@@ -285,29 +283,17 @@ async fn run() -> Result<()> {
     }
 
     // Launch TUI in separate thread if not headless
-    // No TUI in headless or JSON (agent) mode. In JSON mode the blame stream is
-    // emitted directly as NDJSON by the event processor, not via the TUI channel.
-    let (tui_handle, event_tx, blame_tx) = if args.headless || args.json {
-        (None, None, None)
+    let (tui_handle, event_tx) = if args.headless {
+        (None, None)
     } else {
         let (event_tx, event_rx) = bounded(1000);
-
-        // Noisy-neighbour attribution rides its own channel so it never pollutes
-        // the hotspot/worker sample streams. Only wired up when --blame is set.
-        let (blame_tx, blame_rx) = if args.blame {
-            let (tx, rx) = bounded(1000);
-            (Some(tx), Some(rx))
-        } else {
-            (None, None)
-        };
 
         // Spawn TUI thread
         let tui_pid = Some(pid);
         let window_secs = args.window;
-        let handle =
-            std::thread::spawn(move || tui::run_live(event_rx, blame_rx, tui_pid, window_secs));
+        let handle = std::thread::spawn(move || tui::run_live(event_rx, tui_pid, window_secs));
 
-        (Some(handle), Some(event_tx), blame_tx)
+        (Some(handle), Some(event_tx))
     };
 
     // Create event processor with all dependencies
@@ -318,8 +304,6 @@ async fn run() -> Result<()> {
         memory_range,
         trace_exporter,
         event_tx,
-        blame_tx,
-        args.blame && args.json,
     );
 
     // Status tracking
@@ -435,11 +419,6 @@ async fn run() -> Result<()> {
         if !quiet {
             println!("saved: {}", export_path.display());
         }
-    }
-
-    // Agent surface: emit the ranked blame summary as a final JSON object.
-    if let Some(summary) = processor.blame_summary_json() {
-        println!("{summary}");
     }
 
     Ok(())

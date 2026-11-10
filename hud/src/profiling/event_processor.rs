@@ -32,7 +32,7 @@ use crate::classification::classify_frame;
 use crate::domain::StackId;
 use crate::export::TraceEventExporter;
 use crate::symbolization::Symbolizer;
-use crate::trace_data::{BlameData, PreemptionEvent, StackCache, StackFrame, TraceEvent};
+use crate::trace_data::{StackCache, StackFrame, TraceEvent};
 
 /// Encapsulates event processing logic and state
 pub struct EventProcessor<'a> {
@@ -65,18 +65,11 @@ pub struct EventProcessor<'a> {
     // Optional outputs
     trace_exporter: Option<TraceEventExporter>,
     event_tx: Option<Sender<TraceEvent>>,
-    /// Channel for attributed preemptions (blame mode). `None` unless `--blame`.
-    blame_tx: Option<Sender<PreemptionEvent>>,
-    /// Emit machine-readable NDJSON for agents (the `--json` agent surface).
-    blame_json: bool,
-    /// Accumulates attributions for the end-of-run JSON summary.
-    blame_acc: BlameData,
 }
 
 impl<'a> EventProcessor<'a> {
     /// Create a new event processor
     #[must_use]
-    #[allow(clippy::too_many_arguments)] // wiring constructor; grouping would obscure
     pub fn new(
         headless: bool,
         stack_resolver: StackResolver<'a>,
@@ -84,8 +77,6 @@ impl<'a> EventProcessor<'a> {
         memory_range: Option<MemoryRange>,
         trace_exporter: Option<TraceEventExporter>,
         event_tx: Option<Sender<TraceEvent>>,
-        blame_tx: Option<Sender<PreemptionEvent>>,
-        blame_json: bool,
     ) -> Self {
         Self {
             headless,
@@ -105,9 +96,6 @@ impl<'a> EventProcessor<'a> {
             memory_range,
             trace_exporter,
             event_tx,
-            blame_tx,
-            blame_json,
-            blame_acc: BlameData::new(),
         }
     }
 
@@ -146,35 +134,6 @@ impl<'a> EventProcessor<'a> {
         self.trace_exporter.take()
     }
 
-    /// Build the end-of-run blame summary as a single JSON object, if `--json`
-    /// blame mode is active: the culprits ranked by how often they preempted a
-    /// runnable worker. Counts and share — deliberately not stolen-time.
-    #[must_use]
-    #[allow(clippy::cast_precision_loss)] // share is a display ratio; precision is ample
-    pub fn blame_summary_json(&self) -> Option<String> {
-        if !self.blame_json {
-            return None;
-        }
-        let total = self.blame_acc.total();
-        let culprits: Vec<String> = self
-            .blame_acc
-            .ranked()
-            .iter()
-            .map(|(tid, comm, count)| {
-                let share = if total > 0 { *count as f64 / total as f64 } else { 0.0 };
-                format!(
-                    "{{\"tid\":{tid},\"comm\":{},\"count\":{count},\"share\":{share:.4}}}",
-                    json_string(comm)
-                )
-            })
-            .collect();
-        Some(format!(
-            "{{\"type\":\"summary\",\"total_preemptions\":{total},\"total_stall_ns\":{},\"culprits\":[{}]}}",
-            self.blame_acc.total_off_cpu_ns(),
-            culprits.join(",")
-        ))
-    }
-
     // Private event handlers
 
     fn handle_scheduler_detected<T: std::borrow::Borrow<aya::maps::MapData>>(
@@ -198,47 +157,6 @@ impl<'a> EventProcessor<'a> {
         }
 
         self.stats.scheduler_detected += 1;
-
-        // Noisy-neighbour attribution (blame mode). A culprit pid of 0 means no
-        // external preemptor was captured (e.g. kicked for the idle task) — skip
-        // rather than blame a ghost.
-        if event.culprit_pid != 0 && (self.blame_tx.is_some() || self.blame_json) {
-            let comm = comm_to_string(&event.culprit_comm);
-
-            // Agent surface: one NDJSON object per attributed preemption, with the
-            // full richness (timestamp, cpu, the victim's OWN off-CPU gap — not
-            // attributed as stolen-by-culprit — and ids) so an agent can reason
-            // over the distribution. Also accumulate for the end-of-run summary.
-            if self.blame_json {
-                println!(
-                    "{{\"type\":\"preemption\",\"ts_ns\":{},\"cpu\":{},\"worker_id\":{},\"victim_pid\":{},\"victim_tid\":{},\"culprit_tid\":{},\"culprit_comm\":{},\"victim_off_cpu_ns\":{}}}",
-                    event.timestamp_ns,
-                    event.cpu_id,
-                    event.worker_id,
-                    event.pid,
-                    event.tid,
-                    event.culprit_pid,
-                    json_string(&comm),
-                    event.duration_ns,
-                );
-                self.blame_acc.record(PreemptionEvent {
-                    worker_id: event.worker_id,
-                    culprit_pid: event.culprit_pid,
-                    culprit_comm: comm.clone(),
-                    off_cpu_ns: event.duration_ns,
-                });
-            }
-
-            // Human surface: forward on its own channel to the NEIGHBOURS panel.
-            if let Some(ref tx) = self.blame_tx {
-                let _ = tx.try_send(PreemptionEvent {
-                    worker_id: event.worker_id,
-                    culprit_pid: event.culprit_pid,
-                    culprit_comm: comm,
-                    off_cpu_ns: event.duration_ns,
-                });
-            }
-        }
 
         if self.headless {
             display_scheduler_detected(&event, &self.stack_resolver, stack_traces);
@@ -486,37 +404,6 @@ impl<'a> EventProcessor<'a> {
     }
 }
 
-/// Convert a NUL-padded kernel `comm` byte array to a trimmed `String`.
-fn comm_to_string(comm: &[u8; 16]) -> String {
-    let end = comm.iter().position(|&b| b == 0).unwrap_or(comm.len());
-    String::from_utf8_lossy(&comm[..end]).trim().to_string()
-}
-
-/// Serialize a string as a quoted, escaped JSON string literal.
-///
-/// Kernel `comm` names are almost always plain ASCII, but a thread can set an
-/// arbitrary name — so escape defensively rather than trust the input.
-fn json_string(s: &str) -> String {
-    use std::fmt::Write;
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('"');
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 => {
-                let _ = write!(out, "\\u{:04x}", c as u32);
-            }
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
-}
-
 /// Returns `true` if the call stack originates from Tokio's blocking thread pool
 /// (`spawn_blocking`), as opposed to an async worker thread.
 ///
@@ -559,18 +446,6 @@ mod tests {
             origin: FrameOrigin::Unknown,
             is_user_code: false,
         }
-    }
-
-    #[test]
-    fn comm_to_string_trims_nul_padding() {
-        let mut c = [0u8; 16];
-        c[..11].copy_from_slice(b"log-flusher");
-        assert_eq!(comm_to_string(&c), "log-flusher");
-    }
-
-    #[test]
-    fn json_string_escapes_quotes_and_backslashes() {
-        assert_eq!(json_string("a\"b\\c"), "\"a\\\"b\\\\c\"");
     }
 
     // ── is_blocking_pool_stack unit tests ─────────────────────────────
